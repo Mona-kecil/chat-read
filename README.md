@@ -11,6 +11,11 @@ This project was created with [Better-T-Stack](https://github.com/AmanVarshney01
 - **Oxlint** - Oxlint + Oxfmt (linting & formatting)
 - **PWA** - Progressive Web App support
 
+## Deps
+- ai-sdk
+- sharp
+- dexie
+
 ## Getting Started
 
 First, install the dependencies:
