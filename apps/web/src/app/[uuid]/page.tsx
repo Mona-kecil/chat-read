@@ -128,6 +128,31 @@ export default function WhatsappDocumentPage() {
   const [isZoomed, setIsZoomed] = useState<boolean>(false);
   const { resolvedTheme, setTheme, theme } = useTheme();
   const activeTheme = theme === "system" ? resolvedTheme : theme;
+  const isDark = activeTheme !== "light";
+  const styles = {
+    pageBg: isDark ? "bg-[#0b141a]" : "bg-[#efeae2]",
+    pageText: isDark ? "text-[#e9edef]" : "text-[#111b21]",
+    phoneBg: isDark ? "bg-[#0b141a]" : "bg-[#f7f8fa]",
+    phoneBorder: isDark ? "border-[#1f2c34]" : "border-[#d1d7db]",
+    headerBg: isDark ? "bg-[#202c33]" : "bg-[#f0f2f5]",
+    icon: isDark ? "text-[#d1d7db]" : "text-[#54656f]",
+    titleText: isDark ? "text-[#e9edef]" : "text-[#111b21]",
+    mutedText: isDark ? "text-[#aebac1]" : "text-[#667781]",
+    bodyBg: isDark ? "bg-[#0b141a]" : "bg-[#efeae2]",
+    bubbleBg: isDark ? "bg-[#1f2c34]" : "bg-white",
+    bubbleText: isDark ? "text-[#e9edef]" : "text-[#111b21]",
+    bubbleBorder: isDark ? "border-[#0b141a]" : "border-[#d1d7db]",
+    footerBg: isDark ? "bg-[#202c33]" : "bg-[#f0f2f5]",
+    footerPanelBg: isDark ? "bg-[#1f2c34]" : "bg-white",
+    footerPanelBorder: isDark ? "border-[#2a3942]" : "border-[#d1d7db]",
+    menuBg: isDark ? "bg-[#1f2c34]" : "bg-white",
+    menuBorder: isDark ? "border-[#1f2c34]" : "border-[#d1d7db]",
+    menuText: isDark ? "text-[#e9edef]" : "text-[#111b21]",
+    menuHover: isDark ? "hover:bg-[#2a3942]" : "hover:bg-[#f0f2f5]",
+    dotPattern: isDark
+      ? "[background-image:radial-gradient(circle_at_1px_1px,_rgba(255,255,255,0.05)_1px,_transparent_0)]"
+      : "[background-image:radial-gradient(circle_at_1px_1px,_rgba(0,0,0,0.06)_1px,_transparent_0)]",
+  };
 
   useEffect(() => {
     if (!uuidParam) {
@@ -242,13 +267,19 @@ export default function WhatsappDocumentPage() {
   const contactInitial = getContactInitial(contactName);
 
   return (
-    <div className="flex min-h-[100svh] flex-col items-center bg-[#0b141a] px-0 py-6 text-[#e9edef]">
-      <div className="flex h-[calc(100svh-3rem)] w-full max-w-md flex-col overflow-hidden rounded-[32px] border border-[#1f2c34] bg-[#0b141a] shadow-2xl">
-        <section className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#0b141a]">
-          <header className="sticky top-0 z-20 bg-[#202c33]">
+    <div
+      className={`flex min-h-[100svh] flex-col items-center ${styles.pageBg} ${styles.pageText}`}
+    >
+      <div
+        className={`flex h-[100svh] w-full max-w-md flex-col overflow-hidden rounded-none border shadow-2xl ${styles.phoneBg} ${styles.phoneBorder}`}
+      >
+        <section className={`flex min-h-0 flex-1 flex-col overflow-y-auto ${styles.bodyBg}`}>
+          <header
+            className={`sticky top-0 z-20 -mx-px w-[calc(100%+2px)] rounded-none ${styles.headerBg}`}
+          >
             <div className="flex items-center gap-3 px-4 pb-3 pt-2">
               <Link
-                className="flex h-9 w-9 items-center justify-center rounded-full text-[#d1d7db]"
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-black/5 ${styles.icon}`}
                 href="/"
                 aria-label="Back to OCR runs"
               >
@@ -259,19 +290,21 @@ export default function WhatsappDocumentPage() {
               </div>
               <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <h1 className="truncate text-base font-semibold text-[#e9edef]">{contactName}</h1>
-                  <p className="text-xs text-[#aebac1]">tap here for info</p>
+                  <h1 className={`truncate text-base font-semibold ${styles.titleText}`}>
+                    {contactName}
+                  </h1>
+                  <p className={`text-xs ${styles.mutedText}`}>tap here for info</p>
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger
-                    className="flex h-9 w-9 items-center justify-center rounded-full text-[#d1d7db] transition hover:bg-white/10"
+                    className={`flex h-9 w-9 items-center justify-center rounded-full transition ${styles.icon} ${styles.menuHover}`}
                     aria-label="Chat options"
                   >
                     <MoreVertical size={18} />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent
                     align="end"
-                    className="rounded-xl border border-[#1f2c34] bg-[#1f2c34] px-3 py-2 text-[#e9edef]"
+                    className={`rounded-xl border px-3 py-2 ${styles.menuBorder} ${styles.menuBg} ${styles.menuText}`}
                   >
                     <div className="relative flex items-center gap-2">
                       <div
@@ -280,7 +313,7 @@ export default function WhatsappDocumentPage() {
                         }`}
                       />
                       <button
-                        className="flex h-8 w-8 items-center justify-center rounded-full border border-transparent text-[#d1d7db] transition hover:bg-[#2a3942]"
+                        className={`flex h-8 w-8 items-center justify-center rounded-full border border-transparent transition ${styles.icon} ${styles.menuHover}`}
                         type="button"
                         onClick={() => setTheme("light")}
                         aria-label="Set light theme"
@@ -288,7 +321,7 @@ export default function WhatsappDocumentPage() {
                         <Sun size={16} />
                       </button>
                       <button
-                        className="flex h-8 w-8 items-center justify-center rounded-full border border-transparent text-[#d1d7db] transition hover:bg-[#2a3942]"
+                        className={`flex h-8 w-8 items-center justify-center rounded-full border border-transparent transition ${styles.icon} ${styles.menuHover}`}
                         type="button"
                         onClick={() => setTheme("dark")}
                         aria-label="Set dark theme"
@@ -303,7 +336,11 @@ export default function WhatsappDocumentPage() {
           </header>
 
           <div className="relative flex flex-1 flex-col gap-4 px-3 py-4">
-            <div className="pointer-events-none absolute inset-0 opacity-40 [background-image:radial-gradient(circle_at_1px_1px,_rgba(255,255,255,0.05)_1px,_transparent_0)] [background-size:24px_24px]" />
+            <div
+              className={`pointer-events-none absolute inset-0 opacity-40 [background-size:24px_24px] ${
+                styles.dotPattern
+              }`}
+            />
             <div className="relative flex flex-col gap-3">
               {chunks.map((chunk) => (
                 <article key={chunk.id} className="flex w-full flex-col items-start gap-3">
@@ -316,11 +353,13 @@ export default function WhatsappDocumentPage() {
                             from="assistant"
                             className="max-w-[85%] self-start"
                           >
-                            <MessageContent className="rounded-2xl bg-[#1f2c34] p-2 text-[#e9edef] shadow">
+                            <MessageContent
+                              className={`rounded-2xl p-2 shadow ${styles.bubbleBg} ${styles.bubbleText}`}
+                            >
                               <img
                                 src={segment.value}
                                 alt="OCR excerpt"
-                                className="h-auto w-full cursor-zoom-in rounded-xl border border-[#0b141a]"
+                                className={`h-auto w-full cursor-zoom-in rounded-xl border ${styles.bubbleBorder}`}
                                 onClick={() => {
                                   setSelectedImage(segment.value);
                                   setIsZoomed(false);
@@ -338,7 +377,9 @@ export default function WhatsappDocumentPage() {
                           from="assistant"
                           className="max-w-[85%] self-start"
                         >
-                          <MessageContent className="rounded-2xl bg-[#1f2c34] px-4 py-3 text-[#e9edef] shadow">
+                          <MessageContent
+                            className={`rounded-2xl px-4 py-3 shadow ${styles.bubbleBg} ${styles.bubbleText}`}
+                          >
                             <MessageResponse>{bubble}</MessageResponse>
                           </MessageContent>
                         </Message>
@@ -351,8 +392,14 @@ export default function WhatsappDocumentPage() {
           </div>
         </section>
 
-        <footer className="bg-[#202c33] px-4 py-4">
-          <div className="rounded-2xl border border-[#2a3942] bg-[#1f2c34] px-4 py-3 text-center text-sm text-[#aebac1]">
+        <footer
+          className={`-mx-px w-[calc(100%+2px)] rounded-none px-4 py-4 ${styles.footerBg}`}
+        >
+          <div
+            className={`rounded-2xl border px-4 py-3 text-center text-sm ${
+              styles.footerPanelBg
+            } ${styles.footerPanelBorder} ${styles.mutedText}`}
+          >
             Congratulations, you&apos;ve finished your reading. Go back to the main menu.
           </div>
         </footer>
