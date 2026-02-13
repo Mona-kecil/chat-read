@@ -3,8 +3,9 @@ import { z } from "zod";
 
 export const env = createEnv({
   client: {},
-  runtimeEnv: {
-    AI_GATEWAY_API_KEY: z.string(),
+  server: {
+    MISTRAL_API_KEY: z.string(),
   },
+  runtimeEnv: process.env,
   emptyStringAsUndefined: true,
 });

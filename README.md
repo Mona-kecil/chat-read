@@ -12,6 +12,7 @@ This project was created with [Better-T-Stack](https://github.com/AmanVarshney01
 - **PWA** - Progressive Web App support
 
 ## Deps
+
 - ai-sdk
 - sharp
 - dexie
