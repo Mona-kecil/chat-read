@@ -53,3 +53,7 @@ chat-read/
 - `pnpm run check-types`: Check TypeScript types across all apps
 - `pnpm run check`: Run Oxlint and Oxfmt
 - `cd apps/web && pnpm run generate-pwa-assets`: Generate PWA assets
+
+## License
+
+MIT
