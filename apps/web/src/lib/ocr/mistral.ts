@@ -16,9 +16,10 @@ const MODEL = "mistral-ocr-latest";
 
 export const runMistralOcr = async (payload: FormData) => {
   const file = payload.get("file");
-  const url = payload.get("url");
+  const urlEntry = payload.get("url");
+  const url = typeof urlEntry === "string" ? urlEntry : undefined;
   if (!(file instanceof File)) {
-    if (typeof url !== "string" || url.trim().length === 0) {
+    if (!url || url.trim().length === 0) {
       throw new Error("Missing file or url");
     }
   }
@@ -26,11 +27,7 @@ export const runMistralOcr = async (payload: FormData) => {
     throw new Error("Missing MISTRAL_API_KEY");
   }
 
-  let documentPayload: {
-    type: "image_url" | "document_url";
-    imageUrl?: string;
-    documentUrl?: string;
-  };
+  let documentPayload: { type: "image_url"; imageUrl: string } | { type: "document_url"; documentUrl: string };
 
   if (file instanceof File) {
     const buffer = await file.arrayBuffer();
@@ -50,7 +47,7 @@ export const runMistralOcr = async (payload: FormData) => {
   } else {
     documentPayload = {
       type: "document_url",
-      documentUrl: url.trim(),
+      documentUrl: url!.trim(),
     };
   }
 

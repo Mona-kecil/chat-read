@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { listDocuments, saveOcrSession } from "@/lib/db";
 import { chunkMarkdown } from "@/lib/engine";
+import type { MarkdownChunk } from "@/lib/engine/chunk";
 
 type OcrRun = {
   id: string;
@@ -15,7 +16,24 @@ type OcrRun = {
   documentId?: string | null;
   documentUuid?: string | null;
   chunkCount?: number;
+  cleanupStats?: {
+    total: number;
+    kept?: number;
+    omitted?: number;
+    uncertain?: number;
+    lowConfidenceKept?: number;
+    llmCalls: number;
+    cacheHits: number;
+  };
+  cleanupWarning?: string;
   error?: string;
+};
+
+type OcrImagePayload = { imageBase64?: string | null };
+type OcrPagePayload = {
+  index?: number;
+  markdown?: string;
+  images?: OcrImagePayload[];
 };
 
 export default function Home() {
@@ -133,24 +151,25 @@ export default function Home() {
         failRun(runId, buildErrorMessage(data.error));
         return;
       }
-      const pages = data.pages ?? [];
+      const pages = (data.pages ?? []) as OcrPagePayload[];
       const combined = pages.map((page: { markdown?: string }) => page.markdown ?? "").join("\n\n");
-      const combinedText = combined.trim();
+      const rawText = combined.trim();
       const images = pages
         .flatMap((page: { images?: Array<{ imageBase64?: string | null }> }) => page.images ?? [])
         .map((image) => image.imageBase64)
         .filter((image): image is string => Boolean(image));
-      const chunks = chunkMarkdown(combinedText);
+      const chunks =
+        (data.chunks as MarkdownChunk[] | undefined)?.filter(
+          (chunk): chunk is MarkdownChunk => Boolean(chunk?.text && chunk?.order),
+        ) ?? chunkMarkdown(rawText);
+      const cleanedText = chunks.map((chunk) => chunk.text).join("\n\n").trim();
       const savedDocument = await saveOcrSession({
         sourceType,
         sourceName: file?.name,
         sourceUrl: sourceType === "url" ? url?.trim() || undefined : undefined,
         model: data.model ?? "mistral-ocr-latest",
         pages: pages.map(
-          (
-            page: { markdown?: string; images?: Array<{ imageBase64?: string | null }> },
-            index: number,
-          ) => ({
+          (page: OcrPagePayload, index: number) => ({
             index: page.index ?? index,
             markdown: page.markdown ?? "",
             images: (page.images ?? [])
@@ -159,13 +178,15 @@ export default function Home() {
           }),
         ),
         chunks,
-        textLength: combinedText.length,
+        textLength: cleanedText.length,
       });
       finalizeRun(runId, {
-        text: combinedText,
+        text: cleanedText,
         images,
         meta: { model: data.model ?? "mistral-ocr-latest", pages: pages.length },
         chunkCount: chunks.length,
+        cleanupStats: data.cleanupStats,
+        cleanupWarning: typeof data.cleanupWarning === "string" ? data.cleanupWarning : undefined,
         documentId: savedDocument.id,
         documentUuid: savedDocument.uuid,
         error: undefined,
@@ -343,6 +364,16 @@ export default function Home() {
                   <p className="mt-2 text-xs text-muted-foreground">
                     Model: {run.meta.model} · Pages: {run.meta.pages}
                   </p>
+                ) : null}
+                {run.cleanupStats ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Cleanup: omitted {run.cleanupStats.omitted ?? 0} · uncertain kept{" "}
+                    {run.cleanupStats.lowConfidenceKept ?? 0} · cache hits{" "}
+                    {run.cleanupStats.cacheHits}
+                  </p>
+                ) : null}
+                {run.cleanupWarning ? (
+                  <p className="mt-1 text-xs text-amber-600">{run.cleanupWarning}</p>
                 ) : null}
                 {run.documentUuid ? (
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

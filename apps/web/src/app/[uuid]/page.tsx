@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { fetchDocumentByUuid, type OcrDocumentDetails } from "@/lib/db";
+import { splitIntoSentences } from "@/lib/engine";
 
 const replaceMarkdownImages = (text: string, images: string[]) => {
   let index = 0;
@@ -46,64 +47,190 @@ const splitSegments = (text: string): Array<{ type: "text" | "image"; value: str
   return segments.filter((segment) => segment.value.length > 0);
 };
 
-const splitTextForBubbles = (text: string, limit = 280) => {
+const CONTINUATION_WORDS = new Set(["and", "but", "or", "because", "when"]);
+const TARGET_MIN_CHARS = 180;
+const TARGET_MAX_CHARS = 320;
+const HARD_MAX_CHARS = 420;
+const ORPHAN_MIN_CHARS = 90;
+const isLikelyHeadingLine = (line: string) => /^#{1,6}\s+/.test(line.trim());
+const isSalutationLine = (line: string) =>
+  /^(dear|hi|hello)\b/i.test(line.trim()) || /,$/.test(line.trim());
+const isStandaloneTitleLine = (line: string) => {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length > 60) {
+    return false;
+  }
+  if (isLikelyHeadingLine(trimmed) || isSalutationLine(trimmed)) {
+    return true;
+  }
+  return /^[A-Z][A-Za-z0-9&'()\- ]+$/.test(trimmed) && !/[.!?]$/.test(trimmed);
+};
+
+const splitWordsByLimit = (line: string, limit: number) => {
+  const words = line.split(/\s+/g).filter(Boolean);
+  if (!words.length) {
+    return [];
+  }
+
+  const chunks: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= limit) {
+      current = candidate;
+      continue;
+    }
+    if (current) {
+      chunks.push(current);
+    }
+    if (word.length > limit) {
+      let cursor = 0;
+      while (cursor < word.length) {
+        chunks.push(word.slice(cursor, cursor + limit));
+        cursor += limit;
+      }
+      current = "";
+    } else {
+      current = word;
+    }
+  }
+  if (current) {
+    chunks.push(current);
+  }
+  return chunks;
+};
+
+const shouldPreferAttach = (sentence: string) => {
+  const firstWord = sentence.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  return CONTINUATION_WORDS.has(firstWord) || /^[a-z]/.test(sentence.trim());
+};
+
+const buildTextBlocks = (text: string): string[] => {
   const normalized = text.replace(/\r\n/g, "\n").trim();
   if (!normalized) {
     return [];
   }
 
-  const paragraphs = normalized.split(/\n{2,}/g);
+  const blocks: string[] = [];
+  let current: string[] = [];
+  const pushCurrent = () => {
+    const value = current.join("\n").trim();
+    if (value) {
+      blocks.push(value);
+    }
+    current = [];
+  };
+
+  const lines = normalized.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      pushCurrent();
+      continue;
+    }
+
+    if (isLikelyHeadingLine(trimmed) || isStandaloneTitleLine(trimmed)) {
+      pushCurrent();
+      blocks.push(trimmed);
+      continue;
+    }
+
+    if (isSalutationLine(trimmed)) {
+      pushCurrent();
+      blocks.push(trimmed);
+      continue;
+    }
+
+    const previous = current[current.length - 1]?.trim() ?? "";
+    const startsLowercase = /^[a-z]/.test(trimmed);
+    const previousEndsSentence = /[.!?]"?$/.test(previous);
+    if (previous && previousEndsSentence && !startsLowercase) {
+      pushCurrent();
+    }
+    current.push(trimmed);
+  }
+
+  pushCurrent();
+  return blocks;
+};
+
+const splitTextForBubbles = (text: string, hardMax = HARD_MAX_CHARS) => {
+  const blocks = buildTextBlocks(text);
+  if (!blocks.length) {
+    return [];
+  }
+
   const bubbles: string[] = [];
 
-  paragraphs.forEach((paragraph) => {
-    const lines = paragraph.split("\n");
+  for (const block of blocks) {
+    if (isLikelyHeadingLine(block) || isStandaloneTitleLine(block) || isSalutationLine(block)) {
+      bubbles.push(block.trim());
+      continue;
+    }
+
+    const flatBlock = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join(" ");
+    const sentenceUnits = splitIntoSentences(flatBlock)
+      .map((sentence) => sentence.text.trim())
+      .filter(Boolean);
+    const units = sentenceUnits.length ? sentenceUnits : [flatBlock];
+
     let current = "";
+    for (const unit of units) {
+      const candidate = current ? `${current} ${unit}` : unit;
+      const preferAttach = shouldPreferAttach(unit);
 
-    lines.forEach((line) => {
-      const candidate = current ? `${current}\n${line}` : line;
-
-      if (candidate.length <= limit) {
+      if (candidate.length <= hardMax && (current.length < TARGET_MAX_CHARS || preferAttach)) {
         current = candidate;
-        return;
+        continue;
       }
 
       if (current) {
         bubbles.push(current);
-        current = "";
       }
-
-      if (line.length <= limit) {
-        current = line;
-        return;
-      }
-
-      const words = line.split(/\s+/g).filter(Boolean);
-      let wordChunk = "";
-
-      words.forEach((word) => {
-        const wordCandidate = wordChunk ? `${wordChunk} ${word}` : word;
-        if (wordCandidate.length <= limit) {
-          wordChunk = wordCandidate;
-          return;
+      if (unit.length <= hardMax) {
+        current = unit;
+      } else {
+        const pieces = splitWordsByLimit(unit, hardMax);
+        if (pieces.length > 1) {
+          bubbles.push(...pieces.slice(0, -1));
+          current = pieces[pieces.length - 1] ?? "";
+        } else {
+          current = unit;
         }
-
-        if (wordChunk) {
-          bubbles.push(wordChunk);
-        }
-        wordChunk = word;
-      });
-
-      if (wordChunk) {
-        bubbles.push(wordChunk);
       }
-    });
+    }
 
-    if (current) {
+    if (current.trim()) {
       bubbles.push(current);
     }
-  });
+  }
 
-  return bubbles;
+  const compacted: string[] = [];
+  for (const bubble of bubbles) {
+    const value = bubble.trim();
+    if (!value) {
+      continue;
+    }
+    const previous = compacted[compacted.length - 1];
+    if (
+      previous &&
+      value.length < ORPHAN_MIN_CHARS &&
+      !isLikelyHeadingLine(value) &&
+      !isStandaloneTitleLine(value) &&
+      !isSalutationLine(value) &&
+      (previous.length < TARGET_MIN_CHARS || previous.length + 1 + value.length <= hardMax)
+    ) {
+      compacted[compacted.length - 1] = `${previous} ${value}`;
+      continue;
+    }
+    compacted.push(value);
+  }
+
+  return compacted;
 };
 
 const getContactInitial = (name?: string | null) => {
@@ -265,6 +392,9 @@ export default function WhatsappDocumentPage() {
 
   const contactName = details.document.sourceName ?? "OCR chat";
   const contactInitial = getContactInitial(contactName);
+  const subtitle = details.document.pageCount
+    ? `${details.document.model} · ${details.document.pageCount} pages`
+    : "OCR document";
 
   return (
     <div
@@ -293,7 +423,7 @@ export default function WhatsappDocumentPage() {
                   <h1 className={`truncate text-base font-semibold ${styles.titleText}`}>
                     {contactName}
                   </h1>
-                  <p className={`text-xs ${styles.mutedText}`}>tap here for info</p>
+                  <p className={`text-xs ${styles.mutedText}`}>{subtitle}</p>
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger
@@ -388,21 +518,19 @@ export default function WhatsappDocumentPage() {
                   </div>
                 </article>
               ))}
+
+              <div className="pb-2 pt-4">
+                <div
+                  className={`rounded-2xl border px-4 py-3 text-center text-sm ${
+                    styles.footerPanelBg
+                  } ${styles.footerPanelBorder} ${styles.mutedText}`}
+                >
+                  Congratulations, you&apos;ve finished your reading. Go back to the main menu.
+                </div>
+              </div>
             </div>
           </div>
         </section>
-
-        <footer
-          className={`-mx-px w-[calc(100%+2px)] rounded-none px-4 py-4 ${styles.footerBg}`}
-        >
-          <div
-            className={`rounded-2xl border px-4 py-3 text-center text-sm ${
-              styles.footerPanelBg
-            } ${styles.footerPanelBorder} ${styles.mutedText}`}
-          >
-            Congratulations, you&apos;ve finished your reading. Go back to the main menu.
-          </div>
-        </footer>
       </div>
 
       {selectedImage ? (
