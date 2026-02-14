@@ -54,7 +54,7 @@ const HARD_MAX_CHARS = 420;
 const ORPHAN_MIN_CHARS = 90;
 const isLikelyHeadingLine = (line: string) => /^#{1,6}\s+/.test(line.trim());
 const isSalutationLine = (line: string) =>
-  /^(dear|hi|hello)\b/i.test(line.trim()) || /,$/.test(line.trim());
+  /^(dear|hi|hello)\b/i.test(line.trim()) || line.trim().endsWith(",");
 const isStandaloneTitleLine = (line: string) => {
   const trimmed = line.trim();
   if (!trimmed || trimmed.length > 60) {
