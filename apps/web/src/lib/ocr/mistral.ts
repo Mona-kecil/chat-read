@@ -27,7 +27,9 @@ export const runMistralOcr = async (payload: FormData) => {
     throw new Error("Missing MISTRAL_API_KEY");
   }
 
-  let documentPayload: { type: "image_url"; imageUrl: string } | { type: "document_url"; documentUrl: string };
+  let documentPayload:
+    | { type: "image_url"; imageUrl: string }
+    | { type: "document_url"; documentUrl: string };
 
   if (file instanceof File) {
     const buffer = await file.arrayBuffer();

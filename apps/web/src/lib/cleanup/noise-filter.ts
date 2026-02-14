@@ -70,8 +70,20 @@ const serializeWindow = ({
   next,
 }: {
   target: ChunkWithPage;
-  prev: Array<{ order: number; pageIndex: number; distance: number; crossPage: boolean; text: string }>;
-  next: Array<{ order: number; pageIndex: number; distance: number; crossPage: boolean; text: string }>;
+  prev: Array<{
+    order: number;
+    pageIndex: number;
+    distance: number;
+    crossPage: boolean;
+    text: string;
+  }>;
+  next: Array<{
+    order: number;
+    pageIndex: number;
+    distance: number;
+    crossPage: boolean;
+    text: string;
+  }>;
 }) =>
   JSON.stringify({
     target,
@@ -158,32 +170,32 @@ export const filterNoiseChunks = async (
     } else {
       try {
         stats.llmCalls += 1;
-      classification = await generateStructuredOutput({
-        schema: classificationSchema,
-        system: [
-          "You classify OCR chunks as keep, omit, or uncertain.",
-          "Only classify TARGET. PREV/NEXT are evidence-only context and must not be rewritten.",
-          "Policy: standalone labels like 'Confidential' should be omitted only when context indicates header/footer or repeated boilerplate; otherwise keep.",
-          "If TARGET is a short standalone token/phrase that does not flow semantically with neighbors and looks like logo/header/watermark noise, choose omit.",
-          "If unsure, return uncertain.",
-        ].join(" "),
-        prompt: [
-          "Return JSON only matching schema.",
-          "Examples:",
-          'GOOD (keep): TARGET="Dear Partners," and NEXT starts a letter body paragraph.',
-          'GOOD (keep): TARGET is a full sentence/paragraph from the letter body.',
-          'BAD (omit): TARGET="Confidential" isolated near page top with unrelated neighbors.',
-          'BAD (omit): TARGET="118.99.88.232" appears as standalone first bubble and NEXT is "Ribbit Capital".',
-          'BAD (omit): TARGET="Ribbit Capital" appears as isolated logo text before quote/body paragraphs.',
-          'GOOD (keep): TARGET="confidential information is subject to NDA" in a full sentence paragraph.',
-          "Rules:",
-          "- Prefer KEEP for sentence-like body prose.",
-          "- Prefer OMIT only for standalone artifact chunks that do not flow with neighbors (labels, headers, watermark/logo text, ID/IP-like strings).",
-          "- If TARGET could plausibly be body text, choose KEEP or UNCERTAIN (not OMIT).",
-          "",
-          `DOCUMENT_TITLE: ${options?.documentTitle ?? "(unknown)"}`,
-          `PAGE_POSITION: chunk ${window.target.pageChunkIndex ?? 0} of ${window.target.pageChunkCount ?? 0} on page ${window.target.pageIndex}`,
-          `TARGET_HINTS: ${JSON.stringify(targetHints)}`,
+        classification = await generateStructuredOutput({
+          schema: classificationSchema,
+          system: [
+            "You classify OCR chunks as keep, omit, or uncertain.",
+            "Only classify TARGET. PREV/NEXT are evidence-only context and must not be rewritten.",
+            "Policy: standalone labels like 'Confidential' should be omitted only when context indicates header/footer or repeated boilerplate; otherwise keep.",
+            "If TARGET is a short standalone token/phrase that does not flow semantically with neighbors and looks like logo/header/watermark noise, choose omit.",
+            "If unsure, return uncertain.",
+          ].join(" "),
+          prompt: [
+            "Return JSON only matching schema.",
+            "Examples:",
+            'GOOD (keep): TARGET="Dear Partners," and NEXT starts a letter body paragraph.',
+            "GOOD (keep): TARGET is a full sentence/paragraph from the letter body.",
+            'BAD (omit): TARGET="Confidential" isolated near page top with unrelated neighbors.',
+            'BAD (omit): TARGET="118.99.88.232" appears as standalone first bubble and NEXT is "Ribbit Capital".',
+            'BAD (omit): TARGET="Ribbit Capital" appears as isolated logo text before quote/body paragraphs.',
+            'GOOD (keep): TARGET="confidential information is subject to NDA" in a full sentence paragraph.',
+            "Rules:",
+            "- Prefer KEEP for sentence-like body prose.",
+            "- Prefer OMIT only for standalone artifact chunks that do not flow with neighbors (labels, headers, watermark/logo text, ID/IP-like strings).",
+            "- If TARGET could plausibly be body text, choose KEEP or UNCERTAIN (not OMIT).",
+            "",
+            `DOCUMENT_TITLE: ${options?.documentTitle ?? "(unknown)"}`,
+            `PAGE_POSITION: chunk ${window.target.pageChunkIndex ?? 0} of ${window.target.pageChunkCount ?? 0} on page ${window.target.pageIndex}`,
+            `TARGET_HINTS: ${JSON.stringify(targetHints)}`,
             "",
             `TARGET (order=${window.target.order}, page=${window.target.pageIndex}):`,
             window.target.text,
@@ -206,7 +218,10 @@ export const filterNoiseChunks = async (
       }
     }
 
-    if (classification.decision === "omit" && classification.confidence >= OMIT_CONFIDENCE_THRESHOLD) {
+    if (
+      classification.decision === "omit" &&
+      classification.confidence >= OMIT_CONFIDENCE_THRESHOLD
+    ) {
       stats.omitted += 1;
       trace.push({
         order: window.target.order,
@@ -222,7 +237,10 @@ export const filterNoiseChunks = async (
       stats.uncertain += 1;
     }
 
-    if (classification.decision === "omit" && classification.confidence < OMIT_CONFIDENCE_THRESHOLD) {
+    if (
+      classification.decision === "omit" &&
+      classification.confidence < OMIT_CONFIDENCE_THRESHOLD
+    ) {
       stats.lowConfidenceKept += 1;
     }
 

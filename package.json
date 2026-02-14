@@ -1,7 +1,7 @@
 {
   "name": "chat-read",
-  "license": "MIT",
   "private": true,
+  "license": "MIT",
   "workspaces": [
     "apps/*",
     "packages/*"

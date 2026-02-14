@@ -87,7 +87,11 @@ export const buildChunkWindow = (
     });
   }
 
-  for (let cursor = index + 1; cursor < chunks.length && samePageNext.length < radius; cursor += 1) {
+  for (
+    let cursor = index + 1;
+    cursor < chunks.length && samePageNext.length < radius;
+    cursor += 1
+  ) {
     const chunk = chunks[cursor];
     if (!chunk || chunk.pageIndex !== target.pageIndex) {
       continue;

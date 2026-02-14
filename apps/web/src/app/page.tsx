@@ -159,24 +159,25 @@ export default function Home() {
         .map((image) => image.imageBase64)
         .filter((image): image is string => Boolean(image));
       const chunks =
-        (data.chunks as MarkdownChunk[] | undefined)?.filter(
-          (chunk): chunk is MarkdownChunk => Boolean(chunk?.text && chunk?.order),
+        (data.chunks as MarkdownChunk[] | undefined)?.filter((chunk): chunk is MarkdownChunk =>
+          Boolean(chunk?.text && chunk?.order),
         ) ?? chunkMarkdown(rawText);
-      const cleanedText = chunks.map((chunk) => chunk.text).join("\n\n").trim();
+      const cleanedText = chunks
+        .map((chunk) => chunk.text)
+        .join("\n\n")
+        .trim();
       const savedDocument = await saveOcrSession({
         sourceType,
         sourceName: file?.name,
         sourceUrl: sourceType === "url" ? url?.trim() || undefined : undefined,
         model: data.model ?? "mistral-ocr-latest",
-        pages: pages.map(
-          (page: OcrPagePayload, index: number) => ({
-            index: page.index ?? index,
-            markdown: page.markdown ?? "",
-            images: (page.images ?? [])
-              .map((image) => image.imageBase64)
-              .filter((image): image is string => Boolean(image)),
-          }),
-        ),
+        pages: pages.map((page: OcrPagePayload, index: number) => ({
+          index: page.index ?? index,
+          markdown: page.markdown ?? "",
+          images: (page.images ?? [])
+            .map((image) => image.imageBase64)
+            .filter((image): image is string => Boolean(image)),
+        })),
         chunks,
         textLength: cleanedText.length,
       });
