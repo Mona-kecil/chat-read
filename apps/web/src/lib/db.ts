@@ -158,3 +158,26 @@ export const fetchDocumentByUuid = async (uuid: string): Promise<OcrDocumentDeta
 
 export const listDocuments = async (): Promise<DocumentRecord[]> =>
   db.documents.orderBy("createdAt").reverse().toArray();
+
+export const deleteDocumentByUuid = async (uuid: string): Promise<boolean> => {
+  const document = await db.documents.where("uuid").equals(uuid).first();
+  if (!document) {
+    return false;
+  }
+
+  await db.transaction("rw", db.documents, db.pages, db.chunks, async () => {
+    await db.pages.where("documentId").equals(document.id).delete();
+    await db.chunks.where("documentId").equals(document.id).delete();
+    await db.documents.delete(document.id);
+  });
+
+  return true;
+};
+
+export const clearOcrHistory = async (): Promise<void> => {
+  await db.transaction("rw", db.documents, db.pages, db.chunks, async () => {
+    await db.documents.clear();
+    await db.pages.clear();
+    await db.chunks.clear();
+  });
+};
