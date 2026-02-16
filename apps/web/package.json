@@ -6,6 +6,7 @@
     "dev": "next dev --port 3001",
     "build": "next build",
     "check-types": "tsc --noEmit",
+    "test": "vitest run",
     "start": "next start"
   },
   "dependencies": {
@@ -13,7 +14,6 @@
     "@base-ui/react": "^1.0.0",
     "@chat-read/env": "workspace:*",
     "@mistralai/mistralai": "^1.14.0",
-    "@openrouter/ai-sdk-provider": "^2.2.3",
     "@streamdown/cjk": "^1.0.2",
     "@streamdown/code": "^1.0.2",
     "@streamdown/math": "^1.0.2",
@@ -28,6 +28,7 @@
     "lucide-react": "^0.546.0",
     "next": "^16.1.1",
     "next-themes": "^0.4.6",
+    "parallel-web": "^0.3.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "shadcn": "^3.6.2",
@@ -45,6 +46,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "tailwindcss": "^4.1.10",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "^4.0.18"
   }
 }

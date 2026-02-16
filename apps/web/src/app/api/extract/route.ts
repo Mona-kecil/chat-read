@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
 
 import { chunkMarkdown } from "@/lib/engine/chunk";
-import { runMistralOcr } from "@/lib/ocr/mistral";
+import { runParallelExtract } from "@/lib/ocr/parallel";
 
 export async function POST(request: Request) {
   try {
-    const formData = await request.formData();
-    const ocrResult = await runMistralOcr(formData);
+    const body = (await request.json()) as { url?: string };
+    const url = body.url?.trim();
+    if (!url) {
+      return NextResponse.json({ error: "Missing url" }, { status: 400 });
+    }
+
+    const result = await runParallelExtract(url);
     let sequence = 1;
-    const chunks = ocrResult.pages.flatMap((page, pagePosition) => {
+    const chunks = result.pages.flatMap((page, pagePosition) => {
       const pageChunks = chunkMarkdown(page.markdown ?? "");
       const pageIndex = page.index ?? pagePosition;
       return pageChunks.map((chunk) => ({
@@ -19,11 +24,11 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({
-      ...ocrResult,
+      ...result,
       chunks,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "OCR failed";
+    const message = error instanceof Error ? error.message : "Extraction failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

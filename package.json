@@ -13,7 +13,8 @@
     "check-types": "pnpm -r check-types",
     "dev:native": "pnpm --filter native dev",
     "dev:web": "pnpm --filter web dev",
-    "check": "oxlint && oxfmt --write"
+    "check": "oxlint && oxfmt --write",
+    "test": "pnpm -r test"
   },
   "dependencies": {
     "@chat-read/env": "workspace:*",
@@ -25,7 +26,8 @@
     "@types/node": "^22.13.14",
     "oxfmt": "^0.26.0",
     "oxlint": "^1.41.0",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "^4.0.18"
   },
   "packageManager": "pnpm@10.28.0"
 }
