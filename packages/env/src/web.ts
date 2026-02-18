@@ -6,10 +6,12 @@ export const env = createEnv({
   server: {
     MISTRAL_API_KEY: z.string(),
     PARALLEL_API_KEY: z.string().optional(),
+    OPENROUTER_API_KEY: z.string().optional(),
   },
   runtimeEnv: {
     MISTRAL_API_KEY: process.env.MISTRAL_API_KEY,
     PARALLEL_API_KEY: process.env.PARALLEL_API_KEY,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   },
   emptyStringAsUndefined: true,
 });
