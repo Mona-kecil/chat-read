@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, Moon, MoreVertical, Sun } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Bookmark, ChevronLeft, Moon, MoreVertical, RotateCcw, Sun, Trash2 } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
@@ -12,8 +12,14 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { fetchDocumentByUuid, type OcrDocumentDetails } from "@/lib/db";
-import { splitIntoSentences } from "@/lib/engine";
+import { formatDocTitle } from "@/lib/format";
+import {
+  fetchDocumentByUuid,
+  toggleBubbleBookmark,
+  softDeleteBubble,
+  restoreBubble,
+  type OcrDocumentDetails,
+} from "@/lib/db";
 
 const replaceMarkdownImages = (text: string, images: string[]) => {
   let index = 0;
@@ -47,192 +53,6 @@ const splitSegments = (text: string): Array<{ type: "text" | "image"; value: str
   return segments.filter((segment) => segment.value.length > 0);
 };
 
-const CONTINUATION_WORDS = new Set(["and", "but", "or", "because", "when"]);
-const TARGET_MIN_CHARS = 180;
-const TARGET_MAX_CHARS = 320;
-const HARD_MAX_CHARS = 420;
-const ORPHAN_MIN_CHARS = 90;
-const isLikelyHeadingLine = (line: string) => /^#{1,6}\s+/.test(line.trim());
-const isSalutationLine = (line: string) =>
-  /^(dear|hi|hello)\b/i.test(line.trim()) || line.trim().endsWith(",");
-const isStandaloneTitleLine = (line: string) => {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.length > 60) {
-    return false;
-  }
-  if (isLikelyHeadingLine(trimmed) || isSalutationLine(trimmed)) {
-    return true;
-  }
-  return /^[A-Z][A-Za-z0-9&'()\- ]+$/.test(trimmed) && !/[.!?]$/.test(trimmed);
-};
-
-const splitWordsByLimit = (line: string, limit: number) => {
-  const words = line.split(/\s+/g).filter(Boolean);
-  if (!words.length) {
-    return [];
-  }
-
-  const chunks: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length <= limit) {
-      current = candidate;
-      continue;
-    }
-    if (current) {
-      chunks.push(current);
-    }
-    if (word.length > limit) {
-      let cursor = 0;
-      while (cursor < word.length) {
-        chunks.push(word.slice(cursor, cursor + limit));
-        cursor += limit;
-      }
-      current = "";
-    } else {
-      current = word;
-    }
-  }
-  if (current) {
-    chunks.push(current);
-  }
-  return chunks;
-};
-
-const shouldPreferAttach = (sentence: string) => {
-  const firstWord = sentence.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
-  return CONTINUATION_WORDS.has(firstWord) || /^[a-z]/.test(sentence.trim());
-};
-
-const buildTextBlocks = (text: string): string[] => {
-  const normalized = text.replace(/\r\n/g, "\n").trim();
-  if (!normalized) {
-    return [];
-  }
-
-  const blocks: string[] = [];
-  let current: string[] = [];
-  const pushCurrent = () => {
-    const value = current.join("\n").trim();
-    if (value) {
-      blocks.push(value);
-    }
-    current = [];
-  };
-
-  const lines = normalized.split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      pushCurrent();
-      continue;
-    }
-
-    if (isLikelyHeadingLine(trimmed) || isStandaloneTitleLine(trimmed)) {
-      pushCurrent();
-      blocks.push(trimmed);
-      continue;
-    }
-
-    if (isSalutationLine(trimmed)) {
-      pushCurrent();
-      blocks.push(trimmed);
-      continue;
-    }
-
-    const previous = current[current.length - 1]?.trim() ?? "";
-    const startsLowercase = /^[a-z]/.test(trimmed);
-    const previousEndsSentence = /[.!?]"?$/.test(previous);
-    if (previous && previousEndsSentence && !startsLowercase) {
-      pushCurrent();
-    }
-    current.push(trimmed);
-  }
-
-  pushCurrent();
-  return blocks;
-};
-
-const splitTextForBubbles = (text: string, hardMax = HARD_MAX_CHARS) => {
-  const blocks = buildTextBlocks(text);
-  if (!blocks.length) {
-    return [];
-  }
-
-  const bubbles: string[] = [];
-
-  for (const block of blocks) {
-    if (isLikelyHeadingLine(block) || isStandaloneTitleLine(block) || isSalutationLine(block)) {
-      bubbles.push(block.trim());
-      continue;
-    }
-
-    const flatBlock = block
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .join(" ");
-    const sentenceUnits = splitIntoSentences(flatBlock)
-      .map((sentence) => sentence.text.trim())
-      .filter(Boolean);
-    const units = sentenceUnits.length ? sentenceUnits : [flatBlock];
-
-    let current = "";
-    for (const unit of units) {
-      const candidate = current ? `${current} ${unit}` : unit;
-      const preferAttach = shouldPreferAttach(unit);
-
-      if (candidate.length <= hardMax && (current.length < TARGET_MAX_CHARS || preferAttach)) {
-        current = candidate;
-        continue;
-      }
-
-      if (current) {
-        bubbles.push(current);
-      }
-      if (unit.length <= hardMax) {
-        current = unit;
-      } else {
-        const pieces = splitWordsByLimit(unit, hardMax);
-        if (pieces.length > 1) {
-          bubbles.push(...pieces.slice(0, -1));
-          current = pieces[pieces.length - 1] ?? "";
-        } else {
-          current = unit;
-        }
-      }
-    }
-
-    if (current.trim()) {
-      bubbles.push(current);
-    }
-  }
-
-  const compacted: string[] = [];
-  for (const bubble of bubbles) {
-    const value = bubble.trim();
-    if (!value) {
-      continue;
-    }
-    const previous = compacted[compacted.length - 1];
-    if (
-      previous &&
-      value.length < ORPHAN_MIN_CHARS &&
-      !isLikelyHeadingLine(value) &&
-      !isStandaloneTitleLine(value) &&
-      !isSalutationLine(value) &&
-      (previous.length < TARGET_MIN_CHARS || previous.length + 1 + value.length <= hardMax)
-    ) {
-      compacted[compacted.length - 1] = `${previous} ${value}`;
-      continue;
-    }
-    compacted.push(value);
-  }
-
-  return compacted;
-};
-
 const getContactInitial = (name?: string | null) => {
   const fallback = "O";
   if (!name) {
@@ -245,6 +65,8 @@ const getContactInitial = (name?: string | null) => {
   return trimmed[0]?.toUpperCase() ?? fallback;
 };
 
+type BubbleFilter = "all" | "bookmarked" | "deleted";
+
 export default function WhatsappDocumentPage() {
   const params = useParams();
   const uuidParam = Array.isArray(params.uuid) ? params.uuid[0] : params.uuid;
@@ -253,6 +75,10 @@ export default function WhatsappDocumentPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isZoomed, setIsZoomed] = useState<boolean>(false);
+  const [activeBubbleId, setActiveBubbleId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [bubbleFilter, setBubbleFilter] = useState<BubbleFilter>("all");
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { resolvedTheme, setTheme, theme } = useTheme();
   const activeTheme = theme === "system" ? resolvedTheme : theme;
   const isDark = activeTheme !== "light";
@@ -346,19 +172,102 @@ export default function WhatsappDocumentPage() {
     [details],
   );
 
-  const chunks = useMemo(() => {
+  const processedBubbles = useMemo(() => {
     if (!details) {
       return [];
     }
     let imageIndex = 0;
-    return details.chunks.map((chunk) => {
+    return details.bubbles.map((bubble) => {
       const remainingImages = images.slice(imageIndex);
-      const replaced = replaceMarkdownImages(chunk.text, remainingImages);
+      const replaced = replaceMarkdownImages(bubble.text, remainingImages);
       const segments = splitSegments(replaced);
-      imageIndex += segments.filter((segment) => segment.type === "image").length;
-      return { id: chunk.id, order: chunk.order, segments };
+      imageIndex += segments.filter((s) => s.type === "image").length;
+      return { ...bubble, segments };
     });
   }, [details, images]);
+
+  const filteredBubbles = useMemo(() => {
+    switch (bubbleFilter) {
+      case "bookmarked":
+        return processedBubbles.filter((b) => b.bookmarkedAt !== null);
+      case "deleted":
+        return processedBubbles.filter((b) => b.deletedAt !== null);
+      default:
+        return processedBubbles.filter((b) => b.deletedAt === null);
+    }
+  }, [processedBubbles, bubbleFilter]);
+
+  const refreshDetails = async () => {
+    if (!uuidParam) return;
+    const updated = await fetchDocumentByUuid(uuidParam);
+    if (updated) setDetails(updated);
+  };
+
+  const handleBookmark = async (bubbleId: string) => {
+    await toggleBubbleBookmark(bubbleId);
+    await refreshDetails();
+    setActiveBubbleId(null);
+    setMenuPosition(null);
+  };
+
+  const handleDelete = async (bubbleId: string) => {
+    await softDeleteBubble(bubbleId);
+    await refreshDetails();
+    setActiveBubbleId(null);
+    setMenuPosition(null);
+  };
+
+  const handleRestore = async (bubbleId: string) => {
+    await restoreBubble(bubbleId);
+    await refreshDetails();
+  };
+
+  const handlePointerDown = (bubbleId: string, e: React.PointerEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    longPressTimer.current = setTimeout(() => {
+      setActiveBubbleId(bubbleId);
+      setMenuPosition({ x: rect.left + rect.width / 2, y: rect.top });
+    }, 300);
+  };
+
+  const handlePointerUp = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const dismissMenu = () => {
+    setActiveBubbleId(null);
+    setMenuPosition(null);
+  };
+
+  const contentTitle = useMemo(() => {
+    if (!details) return null;
+    return details.document.contentTitle ?? null;
+  }, [details]);
+
+  const authorName = useMemo(() => {
+    const url = details?.document.sourceUrl;
+    if (url) {
+      try {
+        const parsed = new URL(url);
+        const host = parsed.hostname.replace(/^www\./, "");
+        if (host === "x.com" || host === "twitter.com") {
+          const user = parsed.pathname.split("/").filter(Boolean)[0];
+          if (user) return `@${user}`;
+        }
+        return host;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }, [details?.document.sourceUrl]);
+
+  const activeBubble = activeBubbleId
+    ? processedBubbles.find((b) => b.id === activeBubbleId)
+    : null;
 
   if (isLoading) {
     return (
@@ -390,11 +299,19 @@ export default function WhatsappDocumentPage() {
     );
   }
 
-  const contactName = details.document.sourceName ?? "OCR chat";
+  const contactName =
+    contentTitle ?? formatDocTitle(details.document.sourceName, details.document.sourceUrl);
   const contactInitial = getContactInitial(contactName);
-  const subtitle = details.document.pageCount
-    ? `${details.document.model} · ${details.document.pageCount} pages`
-    : "OCR document";
+  const subtitle =
+    [authorName, details.document.pageCount ? `${details.document.pageCount} pages` : null]
+      .filter(Boolean)
+      .join(" · ") || "OCR document";
+
+  const filterTabs: { key: BubbleFilter; label: string }[] = [
+    { key: "all", label: "All" },
+    { key: "bookmarked", label: "Bookmarked" },
+    { key: "deleted", label: "Deleted" },
+  ];
 
   return (
     <div
@@ -463,6 +380,23 @@ export default function WhatsappDocumentPage() {
                 </DropdownMenu>
               </div>
             </div>
+
+            <div className={`flex gap-1 border-t px-4 py-1.5 ${styles.phoneBorder}`}>
+              {filterTabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setBubbleFilter(tab.key)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                    bubbleFilter === tab.key
+                      ? "bg-[#005c4b] text-white"
+                      : `${styles.mutedText} ${styles.menuHover}`
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </header>
 
           <div className="relative flex flex-1 flex-col gap-4 px-3 py-4">
@@ -472,52 +406,83 @@ export default function WhatsappDocumentPage() {
               }`}
             />
             <div className="relative flex flex-col gap-3">
-              {chunks.map((chunk) => (
-                <article key={chunk.id} className="flex w-full flex-col items-start gap-3">
-                  <div className="flex w-full flex-col items-start gap-3">
-                    {chunk.segments.flatMap((segment, index) => {
-                      if (segment.type === "image") {
-                        return [
+              {filteredBubbles.map((bubble) => {
+                const isActive = activeBubbleId === bubble.id;
+                const isDimmed = activeBubbleId !== null && !isActive;
+                const isDeletedView = bubbleFilter === "deleted";
+
+                return (
+                  <article
+                    key={bubble.id}
+                    className={`flex w-full flex-col items-start gap-3 transition-all duration-200 ${
+                      isActive ? "relative z-10 scale-110" : ""
+                    } ${isDimmed ? "blur-sm opacity-50" : ""} ${isDeletedView ? "opacity-60" : ""}`}
+                    onPointerDown={(e) => handlePointerDown(bubble.id, e)}
+                    onPointerUp={handlePointerUp}
+                    onPointerLeave={handlePointerUp}
+                    onContextMenu={(e) => e.preventDefault()}
+                  >
+                    <div className="flex w-full flex-col items-start gap-3">
+                      {bubble.segments.map((segment, index) => {
+                        if (segment.type === "image") {
+                          return (
+                            <Message
+                              key={`${bubble.id}-img-${index}`}
+                              from="assistant"
+                              className="max-w-[85%] self-start"
+                            >
+                              <MessageContent
+                                className={`rounded-2xl p-2 shadow ${styles.bubbleBg} ${styles.bubbleText}`}
+                              >
+                                <img
+                                  src={segment.value}
+                                  alt="OCR excerpt"
+                                  className={`h-auto w-full cursor-zoom-in rounded-xl border ${styles.bubbleBorder}`}
+                                  onClick={() => {
+                                    setSelectedImage(segment.value);
+                                    setIsZoomed(false);
+                                  }}
+                                />
+                              </MessageContent>
+                            </Message>
+                          );
+                        }
+
+                        return (
                           <Message
-                            key={`${chunk.id}-img-${index}`}
+                            key={`${bubble.id}-text-${index}`}
                             from="assistant"
-                            className="max-w-[85%] self-start"
+                            className="relative max-w-[85%] self-start"
                           >
                             <MessageContent
-                              className={`rounded-2xl p-2 shadow ${styles.bubbleBg} ${styles.bubbleText}`}
+                              className={`rounded-2xl px-4 py-3 shadow ${styles.bubbleBg} ${styles.bubbleText}`}
                             >
-                              <img
-                                src={segment.value}
-                                alt="OCR excerpt"
-                                className={`h-auto w-full cursor-zoom-in rounded-xl border ${styles.bubbleBorder}`}
-                                onClick={() => {
-                                  setSelectedImage(segment.value);
-                                  setIsZoomed(false);
-                                }}
-                              />
+                              <MessageResponse>{segment.value}</MessageResponse>
                             </MessageContent>
-                          </Message>,
-                        ];
-                      }
+                            {bubble.bookmarkedAt && (
+                              <Bookmark
+                                size={12}
+                                className="absolute -top-1 right-1 fill-[#25d366] text-[#25d366]"
+                              />
+                            )}
+                          </Message>
+                        );
+                      })}
 
-                      const bubbles = splitTextForBubbles(segment.value);
-                      return bubbles.map((bubble, bubbleIndex) => (
-                        <Message
-                          key={`${chunk.id}-text-${index}-${bubbleIndex}`}
-                          from="assistant"
-                          className="max-w-[85%] self-start"
+                      {isDeletedView && (
+                        <button
+                          type="button"
+                          onClick={() => handleRestore(bubble.id)}
+                          className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs ${styles.mutedText} ${styles.menuHover} border ${styles.menuBorder}`}
                         >
-                          <MessageContent
-                            className={`rounded-2xl px-4 py-3 shadow ${styles.bubbleBg} ${styles.bubbleText}`}
-                          >
-                            <MessageResponse>{bubble}</MessageResponse>
-                          </MessageContent>
-                        </Message>
-                      ));
-                    })}
-                  </div>
-                </article>
-              ))}
+                          <RotateCcw size={12} />
+                          Restore
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
 
               <div className="pb-2 pt-4">
                 <div
@@ -532,6 +497,40 @@ export default function WhatsappDocumentPage() {
           </div>
         </section>
       </div>
+
+      {activeBubbleId !== null && menuPosition !== null && (
+        <div className="fixed inset-0 z-40" onClick={dismissMenu}>
+          <div
+            className={`absolute z-50 flex gap-2 rounded-xl border px-3 py-2 shadow-lg ${styles.menuBg} ${styles.menuBorder}`}
+            style={{
+              left: `${menuPosition.x}px`,
+              top: `${menuPosition.y - 48}px`,
+              transform: "translateX(-50%)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => handleBookmark(activeBubbleId)}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${styles.menuText} ${styles.menuHover}`}
+            >
+              <Bookmark
+                size={14}
+                className={activeBubble?.bookmarkedAt ? "fill-[#25d366] text-[#25d366]" : ""}
+              />
+              {activeBubble?.bookmarkedAt ? "Unbookmark" : "Bookmark"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDelete(activeBubbleId)}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-red-400 transition ${styles.menuHover}`}
+            >
+              <Trash2 size={14} />
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
 
       {selectedImage ? (
         <div
