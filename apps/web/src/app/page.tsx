@@ -5,6 +5,8 @@ import {
   FileText,
   Globe,
   Image,
+  Info,
+  Loader2,
   Moon,
   MoreVertical,
   Plus,
@@ -13,6 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 
 import {
@@ -21,9 +24,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { deleteDocumentByUuid, listDocuments, saveOcrSession } from "@/lib/db";
+import { deleteDocumentByUuid, listDocuments, saveOcrSession, updateDocumentTitle } from "@/lib/db";
 import { chunkMarkdown } from "@/lib/engine";
 import type { MarkdownChunk } from "@/lib/engine/chunk";
+import { formatDocTitle, getDisplayTitle } from "@/lib/format";
 
 type OcrRun = {
   id: string;
@@ -87,6 +91,7 @@ type HistoryItem = {
   sourceType?: string;
   pageCount?: number;
   chunkCount?: number;
+  isGeneratingTitle?: boolean;
 };
 
 const formatRelativeTime = (dateString: string) => {
@@ -156,6 +161,7 @@ export default function Home() {
   const [swipedId, setSwipedId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
   const { setTheme, resolvedTheme } = useTheme();
   const elapsed = useElapsedTimer(pendingCount > 0);
 
@@ -223,7 +229,7 @@ export default function Home() {
           docs.map((doc) => ({
             id: doc.id,
             uuid: doc.uuid,
-            title: doc.sourceName ?? doc.sourceUrl ?? "OCR upload",
+            title: getDisplayTitle(doc.contentTitle, doc.sourceName, doc.sourceUrl),
             createdAt: doc.createdAt,
             sourceType: doc.sourceType,
             pageCount: doc.pageCount,
@@ -349,6 +355,7 @@ export default function Home() {
             .filter((image): image is string => Boolean(image)),
         })),
         chunks,
+        contentTitle: data.title,
         textLength: cleanedText.length,
       });
       finalizeRun(runId, {
@@ -368,14 +375,55 @@ export default function Home() {
         {
           id: savedDocument.id,
           uuid: savedDocument.uuid,
-          title: file?.name ?? (sourceType === "url" ? url?.trim() || "OCR upload" : "OCR upload"),
+          title:
+            data.title ||
+            formatDocTitle(file?.name, sourceType === "url" ? url?.trim() : undefined),
           createdAt: new Date().toISOString(),
           sourceType,
           pageCount: pages.length,
           chunkCount: chunks.length,
+          isGeneratingTitle: !data.title,
         },
         ...prev,
       ]);
+      // Generate title async via LLM
+      if (!data.title) {
+        const titleText = cleanedText.slice(0, 300);
+        if (titleText) {
+          fetch("/api/generate-title", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: titleText }),
+          })
+            .then((res) => res.json())
+            .then(async (titleData) => {
+              const generatedTitle = titleData.title;
+              if (generatedTitle) {
+                await updateDocumentTitle(savedDocument.id, generatedTitle);
+                setHistory((prev) =>
+                  prev.map((item) =>
+                    item.id === savedDocument.id
+                      ? { ...item, title: generatedTitle, isGeneratingTitle: false }
+                      : item,
+                  ),
+                );
+              } else {
+                setHistory((prev) =>
+                  prev.map((item) =>
+                    item.id === savedDocument.id ? { ...item, isGeneratingTitle: false } : item,
+                  ),
+                );
+              }
+            })
+            .catch(() => {
+              setHistory((prev) =>
+                prev.map((item) =>
+                  item.id === savedDocument.id ? { ...item, isGeneratingTitle: false } : item,
+                ),
+              );
+            });
+        }
+      }
     } catch (error) {
       failRun(runId, buildErrorMessage(error));
     } finally {
@@ -470,6 +518,14 @@ export default function Home() {
                   >
                     {resolvedTheme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
                     {resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
+                  </DropdownMenuItem>
+                  <div className={`my-1 border-t ${s.menuBorder}`} />
+                  <DropdownMenuItem
+                    className={`gap-2 rounded-lg px-3 py-2 text-xs ${s.menuHover}`}
+                    onClick={() => router.push("/about")}
+                  >
+                    <Info size={14} />
+                    About
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -583,7 +639,14 @@ export default function Home() {
                     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <div className="flex items-center justify-between gap-2">
                         <p className={`truncate text-[15px] font-medium ${s.titleText}`}>
-                          {doc.title}
+                          {doc.isGeneratingTitle ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <Loader2 size={12} className="animate-spin" />
+                              <span className={s.mutedText}>Generating title…</span>
+                            </span>
+                          ) : (
+                            doc.title
+                          )}
                         </p>
                         <span className={`shrink-0 text-[11px] ${s.mutedText}`}>
                           {formatRelativeTime(doc.createdAt)}
@@ -594,7 +657,7 @@ export default function Home() {
                         <span className="truncate">
                           {doc.pageCount ? `${doc.pageCount} pages` : ""}
                           {doc.pageCount && doc.chunkCount ? " · " : ""}
-                          {doc.chunkCount ? `${doc.chunkCount} chunks` : ""}
+                          {doc.chunkCount ? `${doc.chunkCount} messages` : ""}
                           {!doc.pageCount && !doc.chunkCount ? "OCR document" : ""}
                         </span>
                       </div>
