@@ -5,7 +5,6 @@ Build/Lint/Test:
 - `pnpm build`
 - `pnpm check-types` (tsc across workspaces)
 - `pnpm check` (oxlint + oxfmt)
-- Tests: none configured; single-test: N/A
   Architecture:
 - Monorepo with `apps/*` and `packages/*` (pnpm workspaces)
 - `apps/web` is Next.js 16 app router in `src/app`
@@ -20,4 +19,3 @@ Build/Lint/Test:
 - Formatting via `pnpm check` (oxfmt); double quotes + semicolons
 - Naming: PascalCase components/types, camelCase functions/vars
 - Error handling: throw in server routes, surface status in UI
-  Rules: No `.cursor` rules, `CLAUDE.md`, `.windsurfrules`, `.clinerules`, `.goosehints`, or Copilot rules found.
