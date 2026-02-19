@@ -7,7 +7,7 @@ export const generateTitle = async (text: string): Promise<string | null> => {
     return null;
   }
 
-  const snippet = text.slice(0, 300);
+  const snippet = text.slice(0, 1500);
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",

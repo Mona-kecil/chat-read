@@ -1,5 +1,7 @@
 import { Mistral } from "@mistralai/mistralai";
 import { env } from "@chat-read/env/web";
+import { RequestValidationError } from "@/lib/errors";
+import { isHttpUrl } from "@/lib/url";
 
 export type MistralOcrPage = {
   index: number;
@@ -20,7 +22,7 @@ export const runMistralOcr = async (payload: FormData) => {
   const url = typeof urlEntry === "string" ? urlEntry : undefined;
   if (!(file instanceof File)) {
     if (!url || url.trim().length === 0) {
-      throw new Error("Missing file or url");
+      throw new RequestValidationError("Missing file or url");
     }
   }
   if (!env.MISTRAL_API_KEY) {
@@ -47,6 +49,9 @@ export const runMistralOcr = async (payload: FormData) => {
       };
     }
   } else {
+    if (!isHttpUrl(url!.trim())) {
+      throw new RequestValidationError("Invalid url");
+    }
     documentPayload = {
       type: "document_url",
       documentUrl: url!.trim(),

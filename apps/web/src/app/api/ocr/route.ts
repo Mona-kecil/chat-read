@@ -1,22 +1,14 @@
 import { NextResponse } from "next/server";
 
-import { chunkMarkdown } from "@/lib/engine/chunk";
+import { ChunkingLimitError, chunkPagesToRecords } from "@/lib/engine/chunk-pages";
+import { RequestValidationError } from "@/lib/errors";
 import { runMistralOcr } from "@/lib/ocr/mistral";
 
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const ocrResult = await runMistralOcr(formData);
-    let sequence = 1;
-    const chunks = ocrResult.pages.flatMap((page, pagePosition) => {
-      const pageChunks = chunkMarkdown(page.markdown ?? "");
-      const pageIndex = page.index ?? pagePosition;
-      return pageChunks.map((chunk) => ({
-        order: sequence++,
-        text: chunk.text,
-        pageIndex,
-      }));
-    });
+    const chunks = chunkPagesToRecords(ocrResult.pages);
 
     return NextResponse.json({
       ...ocrResult,
@@ -24,6 +16,12 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "OCR failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const status =
+      error instanceof RequestValidationError
+        ? error.status
+        : error instanceof ChunkingLimitError
+          ? error.status
+          : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

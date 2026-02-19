@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { chunkMarkdown } from "@/lib/engine/chunk";
+import { ChunkingLimitError, chunkPagesToRecords } from "@/lib/engine/chunk-pages";
 import { runParallelExtract } from "@/lib/ocr/parallel";
+import { isHttpUrl } from "@/lib/url";
 
 export async function POST(request: Request) {
   try {
@@ -10,18 +11,12 @@ export async function POST(request: Request) {
     if (!url) {
       return NextResponse.json({ error: "Missing url" }, { status: 400 });
     }
+    if (!isHttpUrl(url)) {
+      return NextResponse.json({ error: "Invalid url" }, { status: 400 });
+    }
 
     const result = await runParallelExtract(url);
-    let sequence = 1;
-    const chunks = result.pages.flatMap((page, pagePosition) => {
-      const pageChunks = chunkMarkdown(page.markdown ?? "");
-      const pageIndex = page.index ?? pagePosition;
-      return pageChunks.map((chunk) => ({
-        order: sequence++,
-        text: chunk.text,
-        pageIndex,
-      }));
-    });
+    const chunks = chunkPagesToRecords(result.pages);
 
     return NextResponse.json({
       ...result,
@@ -29,6 +24,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Extraction failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const status = error instanceof ChunkingLimitError ? error.status : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }
