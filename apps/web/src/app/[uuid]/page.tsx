@@ -15,6 +15,7 @@ import {
 import { formatDocTitle } from "@/lib/format";
 import {
   fetchDocumentByUuid,
+  touchDocumentOpenedByUuid,
   toggleBubbleBookmark,
   softDeleteBubble,
   restoreBubble,
@@ -78,6 +79,7 @@ export default function WhatsappDocumentPage() {
   const [activeBubbleId, setActiveBubbleId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [bubbleFilter, setBubbleFilter] = useState<BubbleFilter>("all");
+  const [pendingScrollBubbleId, setPendingScrollBubbleId] = useState<string | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { resolvedTheme, setTheme, theme } = useTheme();
   const activeTheme = theme === "system" ? resolvedTheme : theme;
@@ -114,6 +116,10 @@ export default function WhatsappDocumentPage() {
       setIsLoading(false);
       return;
     }
+
+    // Update recency so this thread bubbles to the top on the home screen.
+    void touchDocumentOpenedByUuid(uuidParam);
+
     let isMounted = true;
     setIsLoading(true);
     setError(null);
@@ -197,6 +203,22 @@ export default function WhatsappDocumentPage() {
     }
   }, [processedBubbles, bubbleFilter]);
 
+  useEffect(() => {
+    if (!pendingScrollBubbleId) {
+      return;
+    }
+
+    const element = document.querySelector<HTMLElement>(
+      `[data-bubble-id="${pendingScrollBubbleId}"]`,
+    );
+    if (!element) {
+      return;
+    }
+
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    setPendingScrollBubbleId(null);
+  }, [pendingScrollBubbleId, bubbleFilter, filteredBubbles.length]);
+
   const refreshDetails = async () => {
     if (!uuidParam) return;
     const updated = await fetchDocumentByUuid(uuidParam);
@@ -220,13 +242,22 @@ export default function WhatsappDocumentPage() {
   const handleRestore = async (bubbleId: string) => {
     await restoreBubble(bubbleId);
     await refreshDetails();
+    setActiveBubbleId(null);
+    setMenuPosition(null);
   };
 
   const handlePointerDown = (bubbleId: string, e: React.PointerEvent) => {
-    const rect = e.currentTarget.getBoundingClientRect();
+    // `article` spans the full row width. We want the menu to stick to the actual bubble.
+    const anchor = (e.target as HTMLElement | null)?.closest?.(
+      "[data-bubble-anchor]",
+    ) as HTMLElement | null;
+    const rect = (anchor ?? e.currentTarget).getBoundingClientRect();
+
     longPressTimer.current = setTimeout(() => {
       setActiveBubbleId(bubbleId);
-      setMenuPosition({ x: rect.left + rect.width / 2, y: rect.top });
+      // Anchor to the bubble's right edge so the menu feels attached to the bubble.
+      const x = Math.min(rect.right, window.innerWidth - 12);
+      setMenuPosition({ x, y: rect.bottom });
     }, 300);
   };
 
@@ -240,6 +271,19 @@ export default function WhatsappDocumentPage() {
   const dismissMenu = () => {
     setActiveBubbleId(null);
     setMenuPosition(null);
+  };
+
+  const handleGoToBubble = (bubbleId: string) => {
+    const bubble = processedBubbles.find((b) => b.id === bubbleId);
+    if (!bubble) {
+      dismissMenu();
+      return;
+    }
+
+    // Only invoked from the Bookmarked tab: jump back into the main chat timeline.
+    setBubbleFilter("all");
+    setPendingScrollBubbleId(bubbleId);
+    dismissMenu();
   };
 
   const contentTitle = useMemo(() => {
@@ -302,10 +346,15 @@ export default function WhatsappDocumentPage() {
   const contactName =
     contentTitle ?? formatDocTitle(details.document.sourceName, details.document.sourceUrl);
   const contactInitial = getContactInitial(contactName);
-  const subtitle =
-    [authorName, details.document.pageCount ? `${details.document.pageCount} pages` : null]
-      .filter(Boolean)
-      .join(" · ") || "OCR document";
+
+  const messageCount = details.bubbles.filter((b) => b.deletedAt === null).length;
+  const subtitle = [
+    authorName,
+    `${details.document.pageCount} ${details.document.pageCount === 1 ? "page" : "pages"}`,
+    `${messageCount} ${messageCount === 1 ? "message" : "messages"}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const filterTabs: { key: BubbleFilter; label: string }[] = [
     { key: "all", label: "All" },
@@ -414,9 +463,10 @@ export default function WhatsappDocumentPage() {
                 return (
                   <article
                     key={bubble.id}
-                    className={`flex w-full flex-col items-start gap-3 transition-all duration-200 ${
-                      isActive ? "relative z-10 scale-110" : ""
-                    } ${isDimmed ? "blur-sm opacity-50" : ""} ${isDeletedView ? "opacity-60" : ""}`}
+                    data-bubble-id={bubble.id}
+                    className={`flex w-full flex-col items-start gap-3 transition-all ${"duration-200 ease-in-out"} ${isActive ? "relative z-10 origin-top-left translate-x-2 scale-105" : ""} ${
+                      isDimmed ? "blur-sm opacity-50" : ""
+                    } ${isDeletedView ? "opacity-60" : ""}`}
                     onPointerDown={(e) => handlePointerDown(bubble.id, e)}
                     onPointerUp={handlePointerUp}
                     onPointerLeave={handlePointerUp}
@@ -432,6 +482,7 @@ export default function WhatsappDocumentPage() {
                               className="max-w-[85%] self-start"
                             >
                               <MessageContent
+                                data-bubble-anchor
                                 className={`rounded-2xl p-2 shadow ${styles.bubbleBg} ${styles.bubbleText}`}
                               >
                                 <img
@@ -455,6 +506,7 @@ export default function WhatsappDocumentPage() {
                             className="relative max-w-[85%] self-start"
                           >
                             <MessageContent
+                              data-bubble-anchor
                               className={`rounded-2xl px-4 py-3 shadow ${styles.bubbleBg} ${styles.bubbleText}`}
                             >
                               <MessageResponse>{segment.value}</MessageResponse>
@@ -468,17 +520,6 @@ export default function WhatsappDocumentPage() {
                           </Message>
                         );
                       })}
-
-                      {isDeletedView && (
-                        <button
-                          type="button"
-                          onClick={() => handleRestore(bubble.id)}
-                          className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs ${styles.mutedText} ${styles.menuHover} border ${styles.menuBorder}`}
-                        >
-                          <RotateCcw size={12} />
-                          Restore
-                        </button>
-                      )}
                     </div>
                   </article>
                 );
@@ -504,30 +545,52 @@ export default function WhatsappDocumentPage() {
             className={`absolute z-50 flex gap-2 rounded-xl border px-3 py-2 shadow-lg ${styles.menuBg} ${styles.menuBorder}`}
             style={{
               left: `${menuPosition.x}px`,
-              top: `${menuPosition.y - 48}px`,
-              transform: "translateX(-50%)",
+              top: `${menuPosition.y + 12}px`,
+              transform: "translateX(-100%)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <button
-              type="button"
-              onClick={() => handleBookmark(activeBubbleId)}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${styles.menuText} ${styles.menuHover}`}
-            >
-              <Bookmark
-                size={14}
-                className={activeBubble?.bookmarkedAt ? "fill-[#25d366] text-[#25d366]" : ""}
-              />
-              {activeBubble?.bookmarkedAt ? "Unbookmark" : "Bookmark"}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDelete(activeBubbleId)}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-red-400 transition ${styles.menuHover}`}
-            >
-              <Trash2 size={14} />
-              Delete
-            </button>
+            {bubbleFilter === "deleted" ? (
+              <button
+                type="button"
+                onClick={() => handleRestore(activeBubbleId)}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${styles.menuText} ${styles.menuHover}`}
+              >
+                <RotateCcw size={14} />
+                Restore
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleBookmark(activeBubbleId)}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${styles.menuText} ${styles.menuHover}`}
+                >
+                  <Bookmark
+                    size={14}
+                    className={activeBubble?.bookmarkedAt ? "fill-[#25d366] text-[#25d366]" : ""}
+                  />
+                  {activeBubble?.bookmarkedAt ? "Unbookmark" : "Bookmark"}
+                </button>
+                {bubbleFilter === "bookmarked" && (
+                  <button
+                    type="button"
+                    onClick={() => handleGoToBubble(activeBubbleId)}
+                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${styles.menuText} ${styles.menuHover}`}
+                  >
+                    Go to chat bubble
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleDelete(activeBubbleId)}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-red-400 transition ${styles.menuHover}`}
+                >
+                  <Trash2 size={14} />
+                  Delete
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

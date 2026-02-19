@@ -4,7 +4,10 @@ import {
   db,
   saveOcrSession,
   fetchDocumentByUuid,
+  listDocuments,
   toggleBubbleBookmark,
+  toggleDocumentPinnedByUuid,
+  touchDocumentOpenedByUuid,
   softDeleteBubble,
   restoreBubble,
   listBookmarkedBubbles,
@@ -120,6 +123,19 @@ describe("softDeleteBubble", () => {
     expect(deleted).toBe(true);
     const updated = await db.bubbles.get(bubble.id);
     expect(updated!.deletedAt).not.toBeNull();
+  });
+
+  it("should clear bookmarkedAt when deleting a bookmarked bubble", async () => {
+    const result = await saveOcrSession(makeSaveInput());
+    const bubbles = await db.bubbles.where("documentId").equals(result.id).toArray();
+    const bubble = bubbles[0]!;
+
+    await toggleBubbleBookmark(bubble.id);
+    await softDeleteBubble(bubble.id);
+
+    const updated = await db.bubbles.get(bubble.id);
+    expect(updated!.deletedAt).not.toBeNull();
+    expect(updated!.bookmarkedAt).toBeNull();
   });
 });
 
@@ -238,5 +254,51 @@ describe("clearOcrHistory", () => {
 
     const bubbles = await db.bubbles.toArray();
     expect(bubbles.length).toBe(0);
+  });
+});
+
+describe("toggleDocumentPinnedByUuid", () => {
+  it("should set pinnedAt and clear it when toggled again", async () => {
+    const result = await saveOcrSession(makeSaveInput());
+    const doc = await db.documents.get(result.id);
+
+    const pinned = await toggleDocumentPinnedByUuid(doc!.uuid);
+    expect(pinned).not.toBeNull();
+    expect(pinned!.pinnedAt).not.toBeNull();
+
+    const unpinned = await toggleDocumentPinnedByUuid(doc!.uuid);
+    expect(unpinned).not.toBeNull();
+    expect(unpinned!.pinnedAt).toBeNull();
+  });
+
+  it("should sort pinned documents first in listDocuments", async () => {
+    const first = await saveOcrSession(makeSaveInput({ sourceName: "first.pdf" }));
+    const second = await saveOcrSession(makeSaveInput({ sourceName: "second.pdf" }));
+
+    await db.documents.update(first.id, { createdAt: "2024-01-01T00:00:00.000Z" });
+    await db.documents.update(second.id, { createdAt: "2024-01-02T00:00:00.000Z" });
+    await db.documents.update(first.id, { lastOpenedAt: "2024-01-01T00:00:00.000Z" });
+    await db.documents.update(second.id, { lastOpenedAt: "2024-01-02T00:00:00.000Z" });
+
+    const secondDoc = await db.documents.get(second.id);
+    await toggleDocumentPinnedByUuid(secondDoc!.uuid);
+
+    const docs = await listDocuments();
+    expect(docs[0]!.id).toBe(second.id);
+    expect(docs[0]!.pinnedAt).not.toBeNull();
+  });
+
+  it("should bump a document to the top when touched", async () => {
+    const older = await saveOcrSession(makeSaveInput({ sourceName: "older.pdf" }));
+    const newer = await saveOcrSession(makeSaveInput({ sourceName: "newer.pdf" }));
+
+    await db.documents.update(older.id, { lastOpenedAt: "2024-01-01T00:00:00.000Z" });
+    await db.documents.update(newer.id, { lastOpenedAt: "2024-01-02T00:00:00.000Z" });
+
+    const olderDoc = await db.documents.get(older.id);
+    await touchDocumentOpenedByUuid(olderDoc!.uuid);
+
+    const docs = await listDocuments();
+    expect(docs[0]!.id).toBe(older.id);
   });
 });

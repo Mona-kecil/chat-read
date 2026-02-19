@@ -9,6 +9,7 @@ import {
   Loader2,
   Moon,
   MoreVertical,
+  Pin,
   Plus,
   Search,
   Sun,
@@ -24,7 +25,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { deleteDocumentByUuid, listDocuments, saveOcrSession, updateDocumentTitle } from "@/lib/db";
+import {
+  deleteDocumentByUuid,
+  listDocuments,
+  saveOcrSession,
+  toggleDocumentPinnedByUuid,
+  touchDocumentOpenedByUuid,
+  updateDocumentTitle,
+} from "@/lib/db";
 import { chunkMarkdown } from "@/lib/engine";
 import type { MarkdownChunk } from "@/lib/engine/chunk";
 import { formatDocTitle, getDisplayTitle } from "@/lib/format";
@@ -88,6 +96,8 @@ type HistoryItem = {
   uuid: string;
   title: string;
   createdAt: string;
+  pinnedAt?: string | null;
+  lastOpenedAt?: string | null;
   sourceType?: string;
   pageCount?: number;
   chunkCount?: number;
@@ -201,6 +211,51 @@ export default function Home() {
     }
   }, []);
 
+  const sortHistory = useCallback((items: HistoryItem[]) => {
+    const sorted = [...items];
+    sorted.sort((a, b) => {
+      const aPinned = a.pinnedAt ? 1 : 0;
+      const bPinned = b.pinnedAt ? 1 : 0;
+      if (aPinned !== bPinned) {
+        return bPinned - aPinned;
+      }
+      const aOpened = a.lastOpenedAt ?? a.createdAt;
+      const bOpened = b.lastOpenedAt ?? b.createdAt;
+      return bOpened.localeCompare(aOpened);
+    });
+    return sorted;
+  }, []);
+
+  const handleTogglePinned = useCallback(
+    async (uuid: string) => {
+      const updated = await toggleDocumentPinnedByUuid(uuid);
+      if (!updated) {
+        return;
+      }
+      setHistory((prev) =>
+        sortHistory(
+          prev.map((doc) =>
+            doc.uuid === uuid ? { ...doc, pinnedAt: updated.pinnedAt ?? null } : doc,
+          ),
+        ),
+      );
+    },
+    [sortHistory],
+  );
+
+  const handleOpenDocument = useCallback(
+    async (uuid: string) => {
+      // Optimistically bump in the list, then persist.
+      const now = new Date().toISOString();
+      setHistory((prev) =>
+        sortHistory(prev.map((doc) => (doc.uuid === uuid ? { ...doc, lastOpenedAt: now } : doc))),
+      );
+      void touchDocumentOpenedByUuid(uuid);
+      window.location.href = `/${uuid}`;
+    },
+    [sortHistory],
+  );
+
   const trimmedUrls = useMemo(
     () =>
       documentUrls
@@ -226,15 +281,19 @@ export default function Home() {
           return;
         }
         setHistory(
-          docs.map((doc) => ({
-            id: doc.id,
-            uuid: doc.uuid,
-            title: getDisplayTitle(doc.contentTitle, doc.sourceName, doc.sourceUrl),
-            createdAt: doc.createdAt,
-            sourceType: doc.sourceType,
-            pageCount: doc.pageCount,
-            chunkCount: doc.chunkCount,
-          })),
+          sortHistory(
+            docs.map((doc) => ({
+              id: doc.id,
+              uuid: doc.uuid,
+              title: getDisplayTitle(doc.contentTitle, doc.sourceName, doc.sourceUrl),
+              createdAt: doc.createdAt,
+              pinnedAt: doc.pinnedAt ?? null,
+              lastOpenedAt: doc.lastOpenedAt ?? null,
+              sourceType: doc.sourceType,
+              pageCount: doc.pageCount,
+              chunkCount: doc.chunkCount,
+            })),
+          ),
         );
       })
       .catch(() => {
@@ -371,21 +430,25 @@ export default function Home() {
         elapsedMs: Date.now() - startTime,
         error: undefined,
       });
-      setHistory((prev) => [
-        {
-          id: savedDocument.id,
-          uuid: savedDocument.uuid,
-          title:
-            data.title ||
-            formatDocTitle(file?.name, sourceType === "url" ? url?.trim() : undefined),
-          createdAt: new Date().toISOString(),
-          sourceType,
-          pageCount: pages.length,
-          chunkCount: chunks.length,
-          isGeneratingTitle: !data.title,
-        },
-        ...prev,
-      ]);
+      setHistory((prev) =>
+        sortHistory([
+          {
+            id: savedDocument.id,
+            uuid: savedDocument.uuid,
+            title:
+              data.title ||
+              formatDocTitle(file?.name, sourceType === "url" ? url?.trim() : undefined),
+            createdAt: new Date().toISOString(),
+            pinnedAt: null,
+            lastOpenedAt: new Date().toISOString(),
+            sourceType,
+            pageCount: pages.length,
+            chunkCount: chunks.length,
+            isGeneratingTitle: !data.title,
+          },
+          ...prev,
+        ]),
+      );
       // Generate title async via LLM
       if (!data.title) {
         const titleText = cleanedText.slice(0, 300);
@@ -490,6 +553,9 @@ export default function Home() {
   const isProcessing = pendingCount > 0;
 
   const processingRuns = runs.filter((run) => !run.meta && !run.error);
+
+  const pinnedHistory = filteredHistory.filter((doc) => Boolean(doc.pinnedAt));
+  const normalHistory = filteredHistory.filter((doc) => !doc.pinnedAt);
 
   return (
     <div className={`flex min-h-[100svh] flex-col items-center ${s.pageBg} ${s.pageText}`}>
@@ -598,7 +664,15 @@ export default function Home() {
               ))}
 
             {/* Document list */}
-            {filteredHistory.map((doc) => {
+            {pinnedHistory.length ? (
+              <div className="px-4 pb-2 pt-3">
+                <p className={`text-[11px] font-semibold uppercase tracking-wide ${s.mutedText}`}>
+                  Pinned
+                </p>
+              </div>
+            ) : null}
+
+            {pinnedHistory.map((doc) => {
               const SourceIcon = getSourceIcon(doc.sourceType);
               const isSwiped = swipedId === doc.uuid;
               return (
@@ -621,7 +695,7 @@ export default function Home() {
                         setSwipedId(null);
                         return;
                       }
-                      window.location.href = `/${doc.uuid}`;
+                      void handleOpenDocument(doc.uuid);
                     }}
                     onContextMenu={(e) => {
                       e.preventDefault();
@@ -645,12 +719,201 @@ export default function Home() {
                               <span className={s.mutedText}>Generating title…</span>
                             </span>
                           ) : (
-                            doc.title
+                            <span className="inline-flex min-w-0 items-center gap-1.5">
+                              {doc.pinnedAt ? (
+                                <Pin size={12} className="shrink-0 text-[#005c4b]" />
+                              ) : null}
+                              <span className="truncate">{doc.title}</span>
+                            </span>
                           )}
                         </p>
-                        <span className={`shrink-0 text-[11px] ${s.mutedText}`}>
-                          {formatRelativeTime(doc.createdAt)}
+                        <div className="flex shrink-0 items-center gap-1">
+                          <span className={`text-[11px] ${s.mutedText}`}>
+                            {formatRelativeTime(doc.createdAt)}
+                          </span>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              className={`flex h-8 w-8 items-center justify-center rounded-full transition ${s.icon} ${s.menuHover}`}
+                              aria-label="Thread actions"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                              }}
+                            >
+                              <MoreVertical size={16} />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent
+                              align="end"
+                              className={`rounded-xl border px-1 py-1 ${s.menuBorder} ${s.menuBg} ${s.menuText}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                              }}
+                            >
+                              <DropdownMenuItem
+                                className={`gap-2 rounded-lg px-3 py-2 text-xs ${s.menuHover}`}
+                                onClick={() => {
+                                  void handleTogglePinned(doc.uuid);
+                                }}
+                              >
+                                <Pin size={14} />
+                                {doc.pinnedAt ? "Unpin" : "Pin"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className={`gap-2 rounded-lg px-3 py-2 text-xs ${s.menuHover}`}
+                                onClick={() => {
+                                  const confirmed = window.confirm(
+                                    "Delete this thread? This will remove it from your local history.",
+                                  );
+                                  if (!confirmed) {
+                                    return;
+                                  }
+                                  void handleDelete(doc.uuid);
+                                }}
+                              >
+                                <Trash2 size={14} />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </div>
+                      <div className={`flex items-center gap-1.5 text-xs ${s.mutedText}`}>
+                        <SourceIcon size={12} />
+                        <span className="truncate">
+                          {doc.pageCount ? `${doc.pageCount} pages` : ""}
+                          {doc.pageCount && doc.chunkCount ? " · " : ""}
+                          {doc.chunkCount ? `${doc.chunkCount} messages` : ""}
+                          {!doc.pageCount && !doc.chunkCount ? "OCR document" : ""}
                         </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Delete button when swiped */}
+                  {isSwiped ? (
+                    <button
+                      type="button"
+                      className="absolute inset-y-0 right-0 flex w-20 items-center justify-center bg-[#ea3434] text-white transition-opacity"
+                      onClick={() => handleDelete(doc.uuid)}
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
+
+            {pinnedHistory.length && normalHistory.length ? (
+              <div className={`mx-4 border-t ${s.chatItemBorder}`} />
+            ) : null}
+
+            {normalHistory.length ? (
+              <div className="px-4 pb-2 pt-3">
+                <p className={`text-[11px] font-semibold uppercase tracking-wide ${s.mutedText}`}>
+                  Threads
+                </p>
+              </div>
+            ) : null}
+
+            {normalHistory.map((doc) => {
+              const SourceIcon = getSourceIcon(doc.sourceType);
+              const isSwiped = swipedId === doc.uuid;
+              return (
+                <div
+                  key={doc.id}
+                  className={`relative overflow-hidden border-b ${s.chatItemBorder}`}
+                >
+                  {/* Delete action behind */}
+                  <div className="absolute inset-y-0 right-0 flex w-20 items-center justify-center bg-[#ea3434]">
+                    <Trash2 size={18} className="text-white" />
+                  </div>
+
+                  {/* Chat item */}
+                  <div
+                    className={`relative flex items-center gap-3 px-4 py-3 transition-transform duration-200 ${
+                      isSwiped ? "-translate-x-20" : "translate-x-0"
+                    } ${s.bodyBg} ${s.chatItemHover}`}
+                    onClick={() => {
+                      if (isSwiped) {
+                        setSwipedId(null);
+                        return;
+                      }
+                      void handleOpenDocument(doc.uuid);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setSwipedId(isSwiped ? null : doc.uuid);
+                    }}
+                  >
+                    {/* Avatar */}
+                    <div
+                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ${getDocColor(doc.uuid)}`}
+                    >
+                      {getDocInitial(doc.title)}
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className={`truncate text-[15px] font-medium ${s.titleText}`}>
+                          {doc.isGeneratingTitle ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <Loader2 size={12} className="animate-spin" />
+                              <span className={s.mutedText}>Generating title…</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex min-w-0 items-center gap-1.5">
+                              <span className="truncate">{doc.title}</span>
+                            </span>
+                          )}
+                        </p>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <span className={`text-[11px] ${s.mutedText}`}>
+                            {formatRelativeTime(doc.createdAt)}
+                          </span>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              className={`flex h-8 w-8 items-center justify-center rounded-full transition ${s.icon} ${s.menuHover}`}
+                              aria-label="Thread actions"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                              }}
+                            >
+                              <MoreVertical size={16} />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent
+                              align="end"
+                              className={`rounded-xl border px-1 py-1 ${s.menuBorder} ${s.menuBg} ${s.menuText}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                              }}
+                            >
+                              <DropdownMenuItem
+                                className={`gap-2 rounded-lg px-3 py-2 text-xs ${s.menuHover}`}
+                                onClick={() => {
+                                  void handleTogglePinned(doc.uuid);
+                                }}
+                              >
+                                <Pin size={14} />
+                                {doc.pinnedAt ? "Unpin" : "Pin"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className={`gap-2 rounded-lg px-3 py-2 text-xs ${s.menuHover}`}
+                                onClick={() => {
+                                  const confirmed = window.confirm(
+                                    "Delete this thread? This will remove it from your local history.",
+                                  );
+                                  if (!confirmed) {
+                                    return;
+                                  }
+                                  void handleDelete(doc.uuid);
+                                }}
+                              >
+                                <Trash2 size={14} />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                       </div>
                       <div className={`flex items-center gap-1.5 text-xs ${s.mutedText}`}>
                         <SourceIcon size={12} />

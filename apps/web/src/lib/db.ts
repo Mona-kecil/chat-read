@@ -5,6 +5,8 @@ export type DocumentRecord = {
   id: string;
   uuid: string;
   createdAt: string;
+  pinnedAt?: string | null;
+  lastOpenedAt?: string | null;
   sourceType: "file" | "url" | "paste";
   sourceName?: string;
   sourceUrl?: string;
@@ -180,6 +182,28 @@ class ChatReadDB extends Dexie {
             }
           });
       });
+
+    this.version(5)
+      .stores({
+        documents: "id, uuid, createdAt, lastOpenedAt, pinnedAt, sourceType, sourceUrl, sourceName",
+        pages: "id, documentId, index",
+        chunks: "id, documentId, order",
+        bubbles:
+          "id, documentId, chunkId, order, [documentId+order], [documentId+bookmarkedAt], [documentId+deletedAt]",
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table("documents")
+          .toCollection()
+          .modify((doc) => {
+            if (typeof doc.pinnedAt === "undefined") {
+              doc.pinnedAt = null;
+            }
+            if (typeof doc.lastOpenedAt === "undefined") {
+              doc.lastOpenedAt = doc.createdAt;
+            }
+          });
+      });
   }
 }
 
@@ -202,11 +226,50 @@ export const saveOcrSession = async (input: SaveOcrSessionInput): Promise<SaveOc
   const { sourceType, sourceName, sourceUrl, model, pages, chunks, textLength } = input;
   const contentTitle = input.contentTitle ?? extractContentTitle(pages);
 
+  const pageRecords = pages.map((page) => ({
+    id: crypto.randomUUID(),
+    documentId: id,
+    index: page.index,
+    markdown: page.markdown,
+    images: page.images ?? [],
+  }));
+
+  const chunkRecords = chunks.map((chunk) => ({
+    id: crypto.randomUUID(),
+    documentId: id,
+    order: chunk.order,
+    text: chunk.text,
+    charCount: chunk.text.length,
+  }));
+
+  // This can be CPU-heavy for large documents; keep it outside the IndexedDB transaction.
+  const sortedChunks = [...chunkRecords].sort((a, b) => a.order - b.order);
+  let bubbleOrder = 1;
+  const bubbleRecords: BubbleRecord[] = [];
+  for (const chunk of sortedChunks) {
+    const bubbleTexts = splitTextForBubbles(chunk.text);
+    for (const text of bubbleTexts) {
+      bubbleRecords.push({
+        id: crypto.randomUUID(),
+        documentId: id,
+        chunkId: chunk.id,
+        order: bubbleOrder,
+        text,
+        charCount: text.length,
+        bookmarkedAt: null,
+        deletedAt: null,
+      });
+      bubbleOrder += 1;
+    }
+  }
+
   await db.transaction("rw", db.documents, db.pages, db.chunks, db.bubbles, async () => {
     await db.documents.add({
       id,
       uuid,
       createdAt,
+      pinnedAt: null,
+      lastOpenedAt: createdAt,
       sourceType,
       sourceName,
       sourceUrl,
@@ -217,46 +280,8 @@ export const saveOcrSession = async (input: SaveOcrSessionInput): Promise<SaveOc
       contentTitle,
     });
 
-    await db.pages.bulkAdd(
-      pages.map((page) => ({
-        id: crypto.randomUUID(),
-        documentId: id,
-        index: page.index,
-        markdown: page.markdown,
-        images: page.images ?? [],
-      })),
-    );
-
-    const chunkRecords = chunks.map((chunk) => ({
-      id: crypto.randomUUID(),
-      documentId: id,
-      order: chunk.order,
-      text: chunk.text,
-      charCount: chunk.text.length,
-    }));
-
+    await db.pages.bulkAdd(pageRecords);
     await db.chunks.bulkAdd(chunkRecords);
-
-    const sortedChunks = [...chunkRecords].sort((a, b) => a.order - b.order);
-    let bubbleOrder = 1;
-    const bubbleRecords: BubbleRecord[] = [];
-    for (const chunk of sortedChunks) {
-      const bubbleTexts = splitTextForBubbles(chunk.text);
-      for (const text of bubbleTexts) {
-        bubbleRecords.push({
-          id: crypto.randomUUID(),
-          documentId: id,
-          chunkId: chunk.id,
-          order: bubbleOrder,
-          text,
-          charCount: text.length,
-          bookmarkedAt: null,
-          deletedAt: null,
-        });
-        bubbleOrder += 1;
-      }
-    }
-
     await db.bubbles.bulkAdd(bubbleRecords);
   });
 
@@ -286,7 +311,38 @@ export const fetchDocumentByUuid = async (uuid: string): Promise<OcrDocumentDeta
 };
 
 export const listDocuments = async (): Promise<DocumentRecord[]> =>
-  db.documents.orderBy("createdAt").reverse().toArray();
+  (await db.documents.orderBy("createdAt").reverse().toArray()).sort((a, b) => {
+    const aPinned = a.pinnedAt ? 1 : 0;
+    const bPinned = b.pinnedAt ? 1 : 0;
+    if (aPinned !== bPinned) {
+      return bPinned - aPinned;
+    }
+    const aOpened = a.lastOpenedAt ?? a.createdAt;
+    const bOpened = b.lastOpenedAt ?? b.createdAt;
+    return bOpened.localeCompare(aOpened);
+  });
+
+export const toggleDocumentPinnedByUuid = async (uuid: string): Promise<DocumentRecord | null> => {
+  const document = await db.documents.where("uuid").equals(uuid).first();
+  if (!document) {
+    return null;
+  }
+
+  const pinnedAt = document.pinnedAt ? null : new Date().toISOString();
+  await db.documents.update(document.id, { pinnedAt });
+  return { ...document, pinnedAt };
+};
+
+export const touchDocumentOpenedByUuid = async (uuid: string): Promise<DocumentRecord | null> => {
+  const document = await db.documents.where("uuid").equals(uuid).first();
+  if (!document) {
+    return null;
+  }
+
+  const lastOpenedAt = new Date().toISOString();
+  await db.documents.update(document.id, { lastOpenedAt });
+  return { ...document, lastOpenedAt };
+};
 
 export const deleteDocumentByUuid = async (uuid: string): Promise<boolean> => {
   const document = await db.documents.where("uuid").equals(uuid).first();
@@ -333,7 +389,12 @@ export const softDeleteBubble = async (bubbleId: string): Promise<boolean> => {
   if (!bubble) {
     return false;
   }
-  await db.bubbles.update(bubbleId, { deletedAt: new Date().toISOString() });
+
+  // If the user deletes a bubble, it should no longer show up in bookmarks.
+  await db.bubbles.update(bubbleId, {
+    deletedAt: new Date().toISOString(),
+    bookmarkedAt: null,
+  });
   return true;
 };
 
@@ -348,7 +409,7 @@ export const restoreBubble = async (bubbleId: string): Promise<boolean> => {
 
 export const listBookmarkedBubbles = async (documentId: string): Promise<BubbleRecord[]> => {
   const all = await db.bubbles.where("documentId").equals(documentId).toArray();
-  return all.filter((b) => b.bookmarkedAt !== null);
+  return all.filter((b) => b.bookmarkedAt !== null && b.deletedAt === null);
 };
 
 export const listDeletedBubbles = async (documentId: string): Promise<BubbleRecord[]> => {
