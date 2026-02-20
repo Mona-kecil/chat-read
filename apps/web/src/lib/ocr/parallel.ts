@@ -1,5 +1,9 @@
 import Parallel from "parallel-web";
 import { env } from "@chat-read/env/web";
+import { normalizeExtractedTitle } from "@/lib/ocr/title-normalization";
+
+const EXTRACT_TIMEOUT_MS = 20_000;
+const LIVE_FETCH_TIMEOUT_SECONDS = 8;
 
 export type ParallelExtractResult = {
   pages: Array<{ index: number; markdown: string; images: never[] }>;
@@ -12,11 +16,19 @@ export const runParallelExtract = async (url: string): Promise<ParallelExtractRe
     throw new Error("Missing PARALLEL_API_KEY");
   }
 
-  const client = new Parallel({ apiKey: env.PARALLEL_API_KEY });
+  const client = new Parallel({
+    apiKey: env.PARALLEL_API_KEY,
+    timeout: EXTRACT_TIMEOUT_MS,
+    maxRetries: 0,
+  });
   const response = await client.beta.extract({
     urls: [url],
     excerpts: false,
     full_content: true,
+    fetch_policy: {
+      timeout_seconds: LIVE_FETCH_TIMEOUT_SECONDS,
+      disable_cache_fallback: false,
+    },
   });
 
   if (response.errors?.length) {
@@ -38,6 +50,6 @@ export const runParallelExtract = async (url: string): Promise<ParallelExtractRe
       },
     ],
     model: "parallel-extract",
-    title: result.title ?? undefined,
+    title: normalizeExtractedTitle(result.title),
   };
 };
