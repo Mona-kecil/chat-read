@@ -1,6 +1,7 @@
 import { env } from "@chat-read/env/web";
 
-const MODEL = "google/gemini-2.5-flash-lite-preview-09-2025";
+import { TITLE_EXTRACTOR_SYSTEM_PROMPT, TITLE_GENERATION_MODEL } from "@/lib/ocr/title-config";
+import { finalizeGeneratedTitle } from "@/lib/ocr/title-normalization";
 
 export const generateTitle = async (text: string): Promise<string | null> => {
   if (!env.OPENROUTER_API_KEY) {
@@ -16,12 +17,11 @@ export const generateTitle = async (text: string): Promise<string | null> => {
       Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: TITLE_GENERATION_MODEL,
       messages: [
         {
           role: "system",
-          content:
-            "You are a title extractor. Given a text snippet from a document, identify and output ONLY the document's actual title as found in the text. If no clear title exists, output the main topic in 2-5 words. No quotes, no punctuation at the end, no explanation — just the title.",
+          content: TITLE_EXTRACTOR_SYSTEM_PROMPT,
         },
         {
           role: "user",
@@ -38,6 +38,7 @@ export const generateTitle = async (text: string): Promise<string | null> => {
   }
 
   const data = await response.json();
-  const title = data.choices?.[0]?.message?.content?.trim();
-  return title || null;
+  const title = data.choices?.[0]?.message?.content;
+  const normalizedTitle = typeof title === "string" ? title : null;
+  return finalizeGeneratedTitle(normalizedTitle, snippet);
 };

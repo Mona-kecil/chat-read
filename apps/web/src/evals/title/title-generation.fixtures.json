@@ -1,0 +1,72 @@
+[
+  {
+    "id": "x-quoted-1",
+    "category": "x-wrapper",
+    "snippet": "Lance Martin on X: \"Prompt auto-caching with Claude\" / X",
+    "expected": "Prompt auto-caching with Claude",
+    "simulatedRaw": {
+      "legacy": "Lance Martin on X: \"Prompt auto-caching with Claude\" / X",
+      "current": "Prompt auto-caching with Claude"
+    }
+  },
+  {
+    "id": "x-curly-2",
+    "category": "x-wrapper",
+    "snippet": "Author on X: “Prompt caching deep dive” | X",
+    "expected": "Prompt caching deep dive",
+    "simulatedRaw": {
+      "legacy": "Author on X: “Prompt caching deep dive” | X",
+      "current": "Prompt caching deep dive"
+    }
+  },
+  {
+    "id": "article-clean-1",
+    "category": "article",
+    "snippet": "Building Better RAG Systems\nA practical guide to retrieval chunking and reranking.",
+    "expected": "Building Better RAG Systems",
+    "simulatedRaw": {
+      "legacy": "\"Building Better RAG Systems.\"",
+      "current": "Building Better RAG Systems"
+    }
+  },
+  {
+    "id": "ocr-noise-1",
+    "category": "ocr-noise",
+    "snippet": "## THREAD\n@devnotes\non X\n\"Zero-copy embeddings in production\"\n4:42 PM · 2 Feb 2026",
+    "expected": "Zero-copy embeddings in production",
+    "simulatedRaw": {
+      "legacy": "@devnotes on X: \"Zero-copy embeddings in production\" | X",
+      "current": "Zero-copy embeddings in production"
+    }
+  },
+  {
+    "id": "multilingual-1",
+    "category": "multilingual",
+    "snippet": "María en X: \"Arquitectura RAG sin humo\" / X",
+    "expected": "Arquitectura RAG sin humo",
+    "simulatedRaw": {
+      "legacy": "María en X: \"Arquitectura RAG sin humo\" / X",
+      "current": "Arquitectura RAG sin humo"
+    }
+  },
+  {
+    "id": "labelled-title-1",
+    "category": "labelled",
+    "snippet": "Page metadata\nTitle: Caching Strategies for Long Context Agents\nDescription: trade-offs in token budgets",
+    "expected": "Caching Strategies for Long Context Agents",
+    "simulatedRaw": {
+      "legacy": "Title: Caching Strategies for Long Context Agents",
+      "current": "Caching Strategies for Long Context Agents"
+    }
+  },
+  {
+    "id": "no-title-fallback-1",
+    "category": "fallback",
+    "snippet": "This note compares OCR providers, retry strategy, and chunk overlap in production pipelines.",
+    "expected": "OCR pipeline trade-offs",
+    "simulatedRaw": {
+      "legacy": "This article discusses OCR providers and retry strategy.",
+      "current": "OCR pipeline trade-offs"
+    }
+  }
+]

@@ -7,7 +7,10 @@
     "build": "next build",
     "check-types": "tsc --noEmit",
     "test": "vitest run",
-    "start": "next start"
+    "start": "next start",
+    "eval:title": "evalite run src/evals/title/title-generation.eval.ts",
+    "eval:title:watch": "evalite watch src/evals/title/title-generation.eval.ts",
+    "eval:title:ci": "evalite run --threshold 75 src/evals/title/title-generation.eval.ts"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.74",
@@ -45,6 +48,7 @@
     "@types/node": "^20",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "evalite": "1.0.0-beta.16",
     "fake-indexeddb": "^6.2.5",
     "tailwindcss": "^4.1.10",
     "typescript": "catalog:",

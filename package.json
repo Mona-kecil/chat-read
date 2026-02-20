@@ -14,7 +14,9 @@
     "dev:native": "pnpm --filter native dev",
     "dev:web": "pnpm --filter web dev",
     "check": "oxlint && oxfmt --write",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "eval:title": "pnpm --filter web eval:title",
+    "eval:title:ci": "pnpm --filter web eval:title:ci"
   },
   "dependencies": {
     "@chat-read/env": "workspace:*",
