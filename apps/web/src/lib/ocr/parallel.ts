@@ -33,6 +33,10 @@ export const runParallelExtract = async (url: string): Promise<ParallelExtractRe
 
   if (response.errors?.length) {
     const err = response.errors[0];
+    if (err?.error_type === "fetch_error") {
+      throw new Error("Unable to fetch this URL because of bot protection.");
+    }
+
     throw new Error(err?.content ?? `Failed to extract content from ${url}`);
   }
 
