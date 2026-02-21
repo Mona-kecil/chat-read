@@ -49,7 +49,10 @@ type OcrRun = {
   chunkCount?: number;
   elapsedMs?: number;
   error?: string;
+  failedAt?: number;
 };
+
+const FAILED_RUN_AUTO_REMOVE_MS = 5_000;
 
 const useElapsedTimer = (isRunning: boolean) => {
   const [elapsed, setElapsed] = useState(0);
@@ -169,6 +172,8 @@ export default function Home() {
   const [showAddSheet, setShowAddSheet] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [swipedId, setSwipedId] = useState<string | null>(null);
+  const [failedCountdownNow, setFailedCountdownNow] = useState<number>(() => Date.now());
+  const failedRunTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -306,6 +311,29 @@ export default function Home() {
     };
   }, []);
 
+  const failedRuns = useMemo(() => runs.filter((run) => Boolean(run.error)), [runs]);
+
+  useEffect(() => {
+    if (!failedRuns.length) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setFailedCountdownNow(Date.now());
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [failedRuns.length]);
+
+  useEffect(() => {
+    return () => {
+      for (const timeout of failedRunTimeoutsRef.current.values()) {
+        clearTimeout(timeout);
+      }
+      failedRunTimeoutsRef.current.clear();
+    };
+  }, []);
+
   const addRun = (label: string) => {
     const id = crypto.randomUUID();
     setRuns((prev) => [
@@ -325,12 +353,30 @@ export default function Home() {
     setRuns((prev) => prev.map((run) => (run.id === id ? { ...run, ...patch } : run)));
   };
 
+  const removeRun = (id: string) => {
+    const timeout = failedRunTimeoutsRef.current.get(id);
+    if (timeout) {
+      clearTimeout(timeout);
+      failedRunTimeoutsRef.current.delete(id);
+    }
+    setRuns((prev) => prev.filter((run) => run.id !== id));
+  };
+
   const finalizeRun = (id: string, patch: Partial<OcrRun>) => {
     updateRun(id, { status: "OCR complete", ...patch });
   };
 
   const failRun = (id: string, error: string) => {
-    updateRun(id, { status: "OCR failed", error });
+    updateRun(id, { status: "OCR failed", error, failedAt: Date.now() });
+
+    const existingTimeout = failedRunTimeoutsRef.current.get(id);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+    }
+    const timeout = setTimeout(() => {
+      removeRun(id);
+    }, FAILED_RUN_AUTO_REMOVE_MS);
+    failedRunTimeoutsRef.current.set(id, timeout);
   };
 
   const buildErrorMessage = (value: unknown) => {
@@ -646,22 +692,59 @@ export default function Home() {
             ))}
 
             {/* Error runs */}
-            {runs
-              .filter((run) => run.error)
-              .map((run) => (
+            {failedRuns.map((run) => {
+              const radius = 18;
+              const circumference = 2 * Math.PI * radius;
+              const elapsedFailedMs = run.failedAt ? failedCountdownNow - run.failedAt : 0;
+              const remainingRatio = Math.max(
+                0,
+                Math.min(
+                  1,
+                  (FAILED_RUN_AUTO_REMOVE_MS - elapsedFailedMs) / FAILED_RUN_AUTO_REMOVE_MS,
+                ),
+              );
+              const dashOffset = circumference * (1 - remainingRatio);
+
+              return (
                 <div
                   key={run.id}
                   className={`flex items-center gap-3 border-b px-4 py-3 ${s.chatItemBorder}`}
                 >
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#ea3434]/20">
-                    <X size={18} className="text-[#ea3434]" />
+                  <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#ea3434]/20">
+                    <svg
+                      className="absolute h-11 w-11 -rotate-90"
+                      viewBox="0 0 44 44"
+                      aria-hidden="true"
+                    >
+                      <circle
+                        cx="22"
+                        cy="22"
+                        r={radius}
+                        fill="none"
+                        stroke="rgba(234, 52, 52, 0.25)"
+                        strokeWidth="3"
+                      />
+                      <circle
+                        cx="22"
+                        cy="22"
+                        r={radius}
+                        fill="none"
+                        stroke="#ea3434"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeDasharray={circumference}
+                        strokeDashoffset={dashOffset}
+                      />
+                    </svg>
+                    <X size={16} className="relative z-10 text-[#ea3434]" />
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <p className={`truncate text-sm font-medium ${s.titleText}`}>{run.label}</p>
                     <p className="truncate text-xs text-[#ea3434]">{run.error}</p>
                   </div>
                 </div>
-              ))}
+              );
+            })}
 
             {/* Document list */}
             {pinnedHistory.length ? (
